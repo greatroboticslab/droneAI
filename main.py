@@ -1,62 +1,44 @@
 # get youtube links, download the videos, process the videos, make classification prediction, and output results
 
-#
-# needs updating to match new structure in preprocess_data/TestModels.py
-#
 from yt_dlp import YoutubeDL
 import video_classifier as classifier
 from dataclasses import dataclass
 import os
 import csv
+import pandas as pd
 
 @dataclass
 class VideoResult:
     video_path: str
     label_counts: dict
-    crash_events: list
+    unique_crashes: int
     video_link: str
     is_simulation: int
+    duration: str
+    total_frames: int
+    video_title: str
+
+
+def parse_inputs(simulation_input, real_input):
+    simulation_links = [url.strip() for url in simulation_input.split(',') if url.strip()]
+    real_links = [url.strip() for url in real_input.split(',') if url.strip()]
+    return simulation_links, real_links
 
 def get_input():
     print("============================================")
     print("Getting Student Name...")
     print("============================================")
     student = input("Student's Name for Save File: ").strip()
-    # get how many videos
-    sim_count = 0
-    real_count = 0
-    print("============================================")
-    print("Getting Video Count...")
-    print("============================================")
-    while sim_count <= 0:
-        while True:
-            try:
-                sim_count = int(input("How many simulation videos?: ").strip())
-                break
-            except ValueError:
-                print("Invalid input. Please enter an integer.")
-        if sim_count <= 0: print("Need at least 1 simulation video.")
-    print("--------------------------------------------")
-    while real_count <= 0:
-        while True:
-            try:
-                real_count = int(input("How many real flying videos?: ").strip())
-                break
-            except ValueError:
-                print("Invalid input. Please enter an integer.")
-        if real_count <= 0: print("Need at least 1 real flying video.")
     # get youtube links
     print("============================================")
     print("Getting YouTube Links...")
-    print("Provide YouTube Links. Examples: https://www.youtube.com/watch?v=8HkfQjC_2WU OR https://youtu.be/Gd12g9XqSo4")
-    simulation_links = []
-    real_links = []
+    print("Provide YouTube Links. Examples: \'https://youtu.be/Gd12g9XqSo4,https://youtu.be/Gd12g9XqSo4,https://youtu.be/Gd12g9XqSo4\'")
     print("============================================")
-    for i in range(sim_count):
-        simulation_links.append(input(f"Provide Simulation YouTube Video #{i+1} > ").strip())
+    simulation_input = input("Provide Simulation YouTube Videos > ")
     print("--------------------------------------------")
-    for i in range(real_count):
-        real_links.append(input(f"Provide Real Flying YouTube Video #{i+1} > ").strip())
+    real_input = input("Provide Real Flying YouTube Videos > ")
+    # parse links
+    simulation_links, real_links = parse_inputs(simulation_input, real_input)
 
     return student, simulation_links, real_links
 
@@ -68,7 +50,6 @@ def download_videos(simulation_links, real_links,video_folder):
     simulation_paths = []
     real_path = []
     for i, url in enumerate(simulation_links, start=1):
-        print(f"\nDownloading Simulation Video {url} to {video_folder}")
         ydl_opts = {
             'format': 'best',
             'outtmpl': f'{video_folder}/sim_video{i}.%(ext)s'
@@ -78,7 +59,6 @@ def download_videos(simulation_links, real_links,video_folder):
         simulation_paths.append(f'{video_folder}/sim_video{i}.mp4')
     print("--------------------------------------------")
     for i, url in enumerate(real_links, start=1):
-        print(f"\nDownloading Real Flying Video {url} to {video_folder}")
         ydl_opts = {
             'format': 'best',
             'outtmpl': f'{video_folder}/real_video{i}.%(ext)s'
@@ -89,133 +69,92 @@ def download_videos(simulation_links, real_links,video_folder):
     
     return simulation_paths, real_path
 
-def detect_crashes(simulation_links, real_links, simulation_paths, real_path):
+def run_each_model(simulation_links, real_links, simulation_paths, real_path,student,output_folder):
     print("============================================")
-    print("Detecting Crashes...")
+    print("Processing Each Video...")
+    print("============================================")
     model = classifier.get_model()
+    sim_results, real_results = detect_crashes(model, simulation_links, real_links, simulation_paths, real_path)
+
+    print("============================================")
+    print("Saving Results...")
+    print("============================================")
+
+    df_results = result_dataframe(student,sim_results, real_results)
+
+    df_results.to_csv(os.path.join(output_folder,'results.csv'), index=False)
+
+def detect_crashes(model, simulation_links, real_links, simulation_paths, real_path):
     simulation_results = []
     real_results = []
-    print("============================================")
-    for i, path in enumerate(simulation_paths, start=1):
-        print(f"Detecting Simulation Crashes in {path}...")
-
+    for i, video_path in enumerate(simulation_paths, start=1):
         crash_video_filename = f'Simulation_Video_{i}_Crashes.mp4'
         crash_video_path = os.path.join(output_folder,crash_video_filename)
         labeled_video_filename = f'Simulation_Video_{i}_Labeled.mp4'
         labeled_video_path = os.path.join(output_folder,labeled_video_filename)
 
-        label_counts, crash_events = classifier.video_classification(path,labeled_video_path,crash_video_path, model, min_crash_duration=2.0)
-        simulation_results.append(VideoResult(video_path=path, label_counts=label_counts, crash_events=crash_events,video_link=simulation_links[i-1],is_simulation=1))
-    print("\n--------------------------------------------")
-    for i, path in enumerate(real_path, start=1):
-        print(f"Detecting Real Flight Crashes in {path}...")
-
+        label_dict = {"Crash": 0,"Flight": 0,"No drone": 0,"No signal": 0,"Started": 0,"Landing": 0,"Unknown": 0}
+                                                       
+        label_counts, unique_crashes, duration, total_frames = classifier.video_classification(label_dict,video_path,labeled_video_path,crash_video_path, model,2.0)
+        simulation_results.append(
+            VideoResult(
+                video_path=video_path, # current video's file path
+                label_counts=label_counts, # how many times each label got predicted
+                unique_crashes=unique_crashes, # how many unique crashes were calculated
+                video_link=simulation_links[i-1], # the video's youtube link
+                is_simulation=1, # 1 if it's a simulation video
+                duration = duration, # duration of the video
+                total_frames = total_frames, # total amount of frames for the video
+                video_title = f"Simulation Flying #{i}" # title for the video in the results file
+            )
+        )
+    for i, video_path in enumerate(real_path, start=1):
         crash_video_filename = f'Real_Flying_Video_{i}_Crashes.mp4'
         crash_video_path = os.path.join(output_folder,crash_video_filename)
         labeled_video_filename = f'Real_Flying_Video_{i}_Labeled.mp4'
         labeled_video_path = os.path.join(output_folder,labeled_video_filename)
 
-        label_counts, crash_events = classifier.video_classification(path,labeled_video_path,crash_video_path, model, min_crash_duration=2.0)
-        real_results.append(VideoResult(video_path=path, label_counts=label_counts, crash_events=crash_events,video_link=real_links[i-1],is_simulation=0))
-    
+        label_dict = {"Crash": 0,"Flight": 0,"No drone": 0,"No signal": 0,"No started": 0,"Started": 0,"Unstable": 0,"Landing": 0,"Unknown": 0}
+        label_counts, unique_crashes, duration, total_frames = classifier.video_classification(label_dict,video_path,labeled_video_path,crash_video_path, model,2.0)
+        real_results.append(
+            VideoResult(
+                video_path=video_path,
+                label_counts=label_counts,
+                unique_crashes=unique_crashes,
+                video_link=real_links[i-1],
+                is_simulation=0,
+                duration = duration,
+                total_frames = total_frames,
+                video_title = f"Real Flying #{i}"
+            )
+        )
     return simulation_results, real_results
 
-def print_results(simulation_results, real_results):
-    print("\n============================================")
-    print("Results...")
-    print("============================================")
-    print("Simulation Video Results:")
-    for i, result in enumerate(simulation_results, start=1):
-        print(f"\nResults for Simulation Video {i} ({result.video_path}):")
-        for label, count in result.label_counts.items():
-            print(f"{label}: {count}")
-        print(f"\nNumber of unique crashes: {len(result.crash_events)}")
-        for j, (start, end) in enumerate(result.crash_events, start=1):
-            start_formatted = classifier.format_time(start)
-            end_formatted = classifier.format_time(end)
-            duration = end - start
-            print(f"Crash {j}: Start time = {start_formatted}, End time = {end_formatted}, Duration = {duration:.2f}s")
-        print("+++++++++++++++++++++++++++++++++++")
-    print("--------------------------------------------")
-    print("Real Flight Video Results:")
-    for i, result in enumerate(real_results, start=1):
-        print(f"\nResults for Real Flight Video {i} ({result.video_path}):")
-        for label, count in result.label_counts.items():
-            print(f"{label}: {count}")
-        print(f"\nNumber of unique crashes: {len(result.crash_events)}")
-        for j, (start, end) in enumerate(result.crash_events, start=1):
-            start_formatted = classifier.format_time(start)
-            end_formatted = classifier.format_time(end)
-            duration = end - start
-            print(f"Crash {j}: Start time = {start_formatted}, End time = {end_formatted}, Duration = {duration:.2f}s")
-        print("+++++++++++++++++++++++++++++++++")
 
-def result_csv(student,simulation_results, real_results,output_folder):
-    print("============================================")
-    print("Saving Results as CSV File...")
-    print("============================================")
-    results = simulation_results + real_results
-    file_name = 'crash_results.csv'
-    csv_file = os.path.join(output_folder,file_name)
-    csv_columns = [
-        'Student','YouTubeLink', 'IsSimulation', 'UniqueCrashes', 'CrashFrames','FlightFrames', 'NoSignalFrames','StartedFrames','LandingFrames','CrashTimes','CrashDurations'
-    ]
-    # start writing file
-    with open(csv_file, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
-        writer.writeheader()
-        
-        for result in results:
-            unique_crashes = len(result.crash_events)
+def result_dataframe(student,simulation_results, real_results):
+    all_results = simulation_results + real_results
+    data = []
+    for result in all_results:
+        total_labels = sum(result.label_counts.values())
+        row = {
+            "Student": student,
+            "Video Instance": result.video_title,
+            "Video Path": result.video_path,
+            "Predicted Crashes": result.unique_crashes,
+            "Video Link": result.video_link,
+            "Is Simulation": result.is_simulation,
+            "Video Duration": result.duration,
+            "Total Frames": result.total_frames,
+            "Crash Frames %": (result.label_counts["Crash"] / result.total_frames * 100),
+            "Flight Frames %": (result.label_counts["Flight"] / total_labels * 100),
+            "NoSignal Frames %": (result.label_counts["No signal"] / total_labels * 100),
+            "Started Frames %": (result.label_counts["Started"] / total_labels * 100),
+            "Landing Frames %": (result.label_counts["Landing"] / total_labels * 100)
+        }
+        data.append(row)
+    return pd.DataFrame(data)
 
-            # write results
-            if unique_crashes > 0:
-
-                # build string for durations and time stamps
-                crash_times = ''
-                crash_durations = ''
-                for j, (start, end) in enumerate(result.crash_events, start=1):
-                    start_formatted = classifier.format_time(start)
-                    end_formatted = classifier.format_time(end)
-                    duration = end - start
-
-                    crash_times = crash_times + f"[{start_formatted},{end_formatted}]"
-                    crash_durations = crash_durations + f"{duration:.2f}"
-                    if unique_crashes - j != 0:
-                        crash_times = crash_times + ","
-                        crash_durations = crash_durations + ","
-                
-                writer.writerow({
-                    'Student': student,
-                    'YouTubeLink': result.video_link,
-                    'IsSimulation': result.is_simulation,
-                    'UniqueCrashes': unique_crashes,
-                    'CrashFrames': result.label_counts["Crash"],
-                    'FlightFrames': result.label_counts["Flight"],
-                    'NoSignalFrames': result.label_counts["NoSignal"],
-                    'StartedFrames': result.label_counts["Started"],
-                    'LandingFrames': result.label_counts["Landing"],
-                    'CrashTimes': crash_times,
-                    'CrashDurations': crash_durations
-                })  
-            else:
-                # no crashes
-                writer.writerow({
-                    'Student': student,
-                    'YouTubeLink': result.video_link,
-                    'IsSimulation': result.is_simulation,
-                    'UniqueCrashes': unique_crashes,
-                    'CrashFrames': result.label_counts["Crash"],
-                    'FlightFrames': result.label_counts["Flight"],
-                    'NoSignalFrames': result.label_counts["NoSignal"],
-                    'StartedFrames': result.label_counts["Started"],
-                    'LandingFrames': result.label_counts["Landing"],
-                    'CrashTimes': None,
-                    'CrashDurations': None 
-                })
-    print(f"Results have been saved to {csv_file}")
-
-def delete_youtube_videos():
+def delete_youtube_videos(simulation_paths,real_path):
     print("============================================")
     print("Finishing Script...")
     print("============================================")
@@ -240,10 +179,8 @@ if __name__ == '__main__':
     
     student, simulation_links, real_links = get_input()
     simulation_paths, real_path = download_videos(simulation_links, real_links,video_folder)
-    simulation_results, real_results = detect_crashes(simulation_links, real_links, simulation_paths, real_path)
-    print_results(simulation_results, real_results)
-    result_csv(student,simulation_results, real_results,output_folder)
-    delete_youtube_videos()
+    run_each_model(simulation_links, real_links, simulation_paths, real_path,student,output_folder)
+    delete_youtube_videos(simulation_paths,real_path)
     
     
     

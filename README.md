@@ -5,4 +5,5 @@ Here are the steps to run this codebase in Docker:
 - docker build -f Dockerfile -t yolov8:1.0 .
 - docker run --gpus all --shm-size=8g -it -d -e DISPLAY=$DISPLAY -v ${PWD}:/app yolov8:1.0
 ## Requirements:
-- Coming soon...
+- Python 3.11.10
+- pip install yt-dlp (for downloading YouTube links)
