@@ -13,3 +13,5 @@ ENV DEBIAN_FRONTEND=
 WORKDIR /app
 
 COPY . /app
+
+RUN pip install yt-dlp

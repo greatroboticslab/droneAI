@@ -1,13 +1,8 @@
-
-#
-# needs updating to match new structure in preprocess_data/MultipleModelVideoClassifier.py
-#
+# this file runs a provided downloaded video, going frame by frame, making predictions
 
 import os
 import cv2
 from ultralytics import YOLO
-
-output_crash_frames_path = './labeled_frames/Crashes'
 
 def get_model():
     return YOLO("./results/landing_class_v3/weights/best.pt")
@@ -31,28 +26,19 @@ def merge_crash_events(crash_events):
             merged_events.append((current_start, current_end)) # no merging needed
     return merged_events
 
-def video_classification(video_path,label_vid_output,crash_vid_output, model, min_crash_duration=2.0): # min_crash_duration weeds out false flags
+def video_classification(label_dict, video_path,label_vid_output,crash_vid_output, model, min_crash_duration): # min_crash_duration weeds out false flags
     # start video process
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    duration = format_time(total_frames / fps)
     count = 0
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     labeled_out = cv2.VideoWriter(label_vid_output, fourcc, fps, (width, height))
     crash_out = cv2.VideoWriter(crash_vid_output, fourcc, fps, (width, height))
-
-    # label dictionary
-    label_counts = {
-        "Crash": 0,
-        "Flight": 0,
-        "NoSignal": 0,
-        "Started": 0,
-        "Landing": 0,
-        "Unknown": 0
-    }
 
     is_crash = False # is current frame a crash
     crash_events = [] # store crash event tuples (start,end)
@@ -85,26 +71,25 @@ def video_classification(video_path,label_vid_output,crash_vid_output, model, mi
             top1_index = results[0].probs.top1
 
             if top1_index == 0:
-                label_counts["Crash"] += 1
+                label_dict["Crash"] += 1
                 current_label = "Crash"
             elif top1_index == 1:
-                label_counts["Flight"] += 1
+                label_dict["Flight"] += 1
                 current_label = "Flight"
             elif top1_index == 2:
-                label_counts["NoSignal"] += 1
-                current_label = "NoSignal"
-            elif top1_index == 3:
-                label_counts["Started"] += 1
-                current_label = "Started"
-            elif top1_index == 4:
-                label_counts["Landing"] += 1
+                label_dict["Landing"] += 1
                 current_label = "Landing"
+            elif top1_index == 3:
+                label_dict["No signal"] += 1
+                current_label = "No signal"
+            elif top1_index == 4:
+                label_dict["Started"] += 1
+                current_label = "Started"
             else:
-                label_counts["Unknown"] += 1
+                label_dict["Unknown"] += 1
 
         if current_label == "Crash":
             crash_out.write(og_frame)
-            #cv2.imwrite(os.path.join(output_crash_frames_path,f'crash_frame{count + 1}.png'), frame)
             if not is_crash:
                 # start new crash event
                 crash_start_time = current_time_sec
@@ -157,18 +142,4 @@ def video_classification(video_path,label_vid_output,crash_vid_output, model, mi
     # merge events to only have unique crashes
     merged_crash_events = merge_crash_events(crash_events)
 
-    return label_counts, merged_crash_events
-
-if __name__ == '__main__':
-    model = get_model()
-
-    label_counts, crash_events = video_classification('./videos/test.mkv', model, min_crash_duration=2.0)
-    for label, count in label_counts.items():
-        print(f"\n{label}: {count}")
-
-    print(f"\nNumber of unique crashes: {len(crash_events)}")
-    for i, (start, end) in enumerate(crash_events):
-        start_formatted = format_time(start)
-        end_formatted = format_time(end)
-        duration = end - start
-        print(f"Crash {i+1}: Start time = {start_formatted}, End time = {end_formatted}, Duration = {duration:.2f}s")
+    return label_dict, len(merged_crash_events), duration, total_frames
