@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Streaming Video</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Video Stream - Mark Crashes</h1>
+
+    <div class="video-container">
+        <img id="video" src="{{ url_for('video_feed') }}" width="640" height="360" />
+    </div>
+
+    <button id="crashBtn">Mark Crash</button>
+    <!-- Crash count display -->
+    <p id="crashCountDisplay">Total Crashes: 0</p>
+</div>
+
+<script>
+document.getElementById('crashBtn').addEventListener('click', function() {
+    fetch('/mark_crash', { method: 'POST' })
+        .then(() => {
+            // after marking crash, fetch the new count
+            fetch('/get_crash_count')
+                .then(r => r.text())
+                .then(count => {
+                    document.getElementById('crashCountDisplay').innerText = 
+                        "Total Crashes: " + count;
+                });
+        });
+});
+
+// Poll every 2s for done status
+setInterval(function() {
+    fetch('/check_status')
+        .then(r => r.text())
+        .then(data => {
+            if (data === "done") {
+                window.location.href = "/final_results";
+            }
+        });
+}, 2000);
+</script>
+</body>
+</html>

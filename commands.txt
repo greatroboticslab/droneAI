@@ -8,6 +8,8 @@ run video prediction: /opt/conda/bin/python3 /app/DroneVIdeoClassifier.py
 
 convert vid encodec: ffmpeg -i ./videos/train_video.mp4 -vf scale=640:640 -c:v libx264 ./videos/train-h264.mp4
 
+validation gui command: /opt/conda/bin/python3 /app/ValidationGUI/app.py
+
 
 simulation: https://youtu.be/Gd12g9XqSo4,https://youtu.be/Vzj78FsgQZg,https://youtu.be/gf7cp6_XFvQ,https://youtu.be/IDr2-0vyeZ4,https://youtu.be/HrokcqLvNw4,https://youtu.be/LgjeJKXb3wY,https://youtu.be/BASxPID4u3Q,https://youtu.be/3oVErC3-HA4,https://youtu.be/F0njRcldRGQ,https://youtu.be/x8-FXWK0aNc,https://youtu.be/cc_4a9E6wmc,https://youtu.be/T3F430E6bpI,https://youtu.be/m_pClpueWIY,https://youtu.be/dNlRmnlWIEY
 real: https://youtu.be/BV7vi3VJgKI

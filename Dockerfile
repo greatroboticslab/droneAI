@@ -15,3 +15,4 @@ WORKDIR /app
 COPY . /app
 
 RUN pip install yt-dlp
+RUN pip install flask

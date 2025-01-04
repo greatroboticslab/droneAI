@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drone Crash Validation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Drone Crash Validation</h1>
+
+    <form method="POST" action="/">
+        <label for="youtube_link">YouTube Link:</label>
+        <input type="text" id="youtube_link" name="youtube_link" required>
+
+        <label for="folder_name">Folder Name:</label>
+        <input type="text" id="folder_name" name="folder_name" required>
+
+        <br><br>
+        <input type="checkbox" id="delete_original" name="delete_original">
+        <label for="delete_original">Delete original downloaded video after processing</label>
+        <br><br>
+
+        <button type="submit">Start Processing</button>
+    </form>
+</div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Final Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Processing Complete</h1>
+    <p>Observed Crashes: {{ crash_count }}</p>
+    <p>Log File: {{ log_file_path }}</p>
+    <p>Check your local folder for the saved crash clips.</p>
+
+    <!-- "Start Over" button -> simply a link back to '/' -->
+    <a href="/">
+        <button>Start Over</button>
+    </a>
+</div>
+</body>
+</html>
