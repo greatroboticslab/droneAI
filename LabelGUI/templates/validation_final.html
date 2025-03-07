@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Final Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Processing Complete (Streaming Ended)</h1>
+    
+    <p>Observed Count: {{ crash_count }}</p>
+    <p>Log File: {{ log_file_path }}</p>
+    <p>Check your local folder for the saved verification clips.</p>
+
+    <p id="progressInfo"></p>
+
+    <a href="/">
+        <button>Start Over</button>
+    </a>
+
+    <div class="page-footer">
+        Created by Ethan Stanks 2025. 
+        <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
+    </div>
+</div>
+
+<script>
+function updateProgress() {
+    fetch('/get_extraction_progress')
+        .then(r => r.json())
+        .then(data => {
+            if (data.in_progress) {
+                document.getElementById('progressInfo').innerText = 
+                    "Making Crash Clips: " + data.current + " / " + data.total;
+            } else {
+                if (data.total > 0) {
+                    document.getElementById('progressInfo').innerText = "All Crash Clips Done!";
+                } else {
+                    document.getElementById('progressInfo').innerText = "No crashes to extract.";
+                }
+            }
+        });
+}
+
+setInterval(updateProgress, 2000);
+</script>
+</body>
+</html>

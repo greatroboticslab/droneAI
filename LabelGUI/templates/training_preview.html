@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Initial Label Preview</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Preview: Choose Initial Label</h1>
+
+    <div class="video-container">
+        <img id="previewVideo" src="{{ url_for('training_preview_feed') }}" width="640" height="360" />
+    </div>
+
+    <br>
+    <button id="replayBtn">Replay Preview</button>
+
+    <form method="POST" action="/training_set_initial_label" style="margin-top: 20px;">
+        <label for="initialLabel">Pick initial label:</label>
+        <select name="chosen_label" id="initialLabel" class="previewLabelSelect">
+            {% for (lbl, color) in label_list %}
+                <option value="{{ lbl }}">{{ lbl }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Continue to Full Labeling</button>
+    </form>
+
+    <div class="page-footer">
+        Created by Ethan Stanks 2025. 
+        <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
+    </div>
+</div>
+
+<script>
+document.getElementById('replayBtn').addEventListener('click', function(){
+    window.location.reload();
+});
+</script>
+
+</body>
+</html>

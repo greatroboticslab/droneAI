@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Training Video</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Training Video Stream</h1>
+
+    <div class="video-container">
+        <img id="video" src="{{ url_for('training_video_feed') }}" width="640" height="360" />
+    </div>
+    
+    <p id="timeDisplay"></p>
+
+    <div id="controlsContainer">
+        <div id="leftControls" style="display:flex; align-items:center; gap:10px;">
+            <button id="rewindBtn">&lt;&lt; Rewind 10s</button>
+            <button id="pauseBtn">Pause</button>
+
+            <div id="labelButtons" style="display:flex; flex-wrap:wrap; gap:6px; margin-left:10px;">
+                {% for (lbl, color) in label_list %}
+                    <button class="labelBtn"
+                            data-bg="{{ color }}"
+                            data-label="{{ lbl }}"
+                            style="background-color: {{ color }};">
+                        {{ lbl }}
+                    </button>
+                {% endfor %}
+            </div>
+        </div>
+
+        <button id="breakBtn">Take a Break</button>
+    </div>
+
+    <p id="statusDisplay"></p>
+
+    <div class="page-footer">
+        Created by Ethan Stanks 2025. 
+        <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
+    </div>
+</div>
+
+<script>
+function formatTime(sec) {
+  sec = Math.floor(sec);
+  let s = sec % 60;
+  let m = Math.floor((sec / 60) % 60);
+  let h = Math.floor(sec / 3600);
+  if (h > 0) {
+    return h + ":" + String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
+  } else {
+    return String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
+  }
+}
+
+let paused = false;
+document.getElementById('pauseBtn').addEventListener('click', function() {
+    fetch('/training_pause', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        paused = data.paused;
+        document.getElementById('pauseBtn').innerText = paused ? "Resume" : "Pause";
+    });
+});
+
+document.getElementById('rewindBtn').addEventListener('click', function() {
+    fetch('/training_rewind', { method: 'POST' });
+});
+
+document.querySelectorAll('.labelBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        let labelName = btn.getAttribute('data-label');
+        let formData = new FormData();
+        formData.append('label_name', labelName);
+        fetch('/training_update_label', {
+            method: 'POST',
+            body: formData
+        });
+    });
+});
+
+document.getElementById('breakBtn').addEventListener('click', function() {
+    fetch('/take_a_break', { method: 'POST' })
+      .then(() => {
+          window.location.href = "/training_break";
+      });
+});
+
+setInterval(function(){
+    fetch('/training_check_status')
+    .then(r => r.text())
+    .then(data => {
+        if (data === "done") {
+            window.location.href = "/training_final";
+        }
+    });
+}, 3000);
+
+setInterval(function(){
+    fetch('/training_time_info')
+      .then(r => r.json())
+      .then(data => {
+          let current = formatTime(data.current_sec);
+          let total = formatTime(data.total_sec);
+          document.getElementById('timeDisplay').innerText = current + " / " + total;
+      });
+}, 1000);
+
+function adjustLabelButtonColors() {
+    document.querySelectorAll('.labelBtn').forEach(btn => {
+        let bgHex = btn.getAttribute('data-bg') || "#FFFFFF";
+        let r = parseInt(bgHex.substr(1,2), 16);
+        let g = parseInt(bgHex.substr(3,2), 16);
+        let b = parseInt(bgHex.substr(5,2), 16);
+        let brightness = (r*0.299 + g*0.587 + b*0.114);
+        if (brightness > 150) {
+            btn.style.color = "#000000";
+        } else {
+            btn.style.color = "#FFFFFF";
+        }
+    });
+}
+
+adjustLabelButtonColors();
+
+</script>
+</body>
+</html>

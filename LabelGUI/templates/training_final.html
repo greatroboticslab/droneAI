@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Training Done</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+    <h1>Training Labeling Complete</h1>
+
+    <p>Below is a summary of your labeled data:</p>
+    <div id="summaryContainer"></div>
+
+    <p id="finalPassInfo"></p>
+
+    <a href="/">
+        <button>Back to Home</button>
+    </a>
+
+    <div class="page-footer">
+        Created by Ethan Stanks 2025. 
+        <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
+    </div>
+</div>
+
+<script>
+function formatTime(sec) {
+  let s = Math.floor(sec % 60);
+  let m = Math.floor((sec / 60) % 60);
+  let h = Math.floor(sec / 3600);
+  if (h > 0) {
+    return h + ":" + String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
+  } else {
+    return String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
+  }
+}
+
+function updateSummary() {
+    fetch('/training_get_progress')
+      .then(r => r.json())
+      .then(data => {
+          if (data.final_pass_in_progress) {
+              document.getElementById('finalPassInfo').innerText =
+                "Final pass writing images... " + data.final_pass_current + " / " + data.final_pass_total;
+          } else {
+              document.getElementById('finalPassInfo').innerText = "All images saved!";
+          }
+      });
+
+    fetch('/training_check_status')
+      .then(r => r.text())
+      .then(state => {
+          if (state === "done") {
+              fetch('/training_get_status')
+                  .then(r => r.json())
+                  .then(info => {
+                      let savedFrames = info.saved_frames_per_label || {};
+                      let totalSaved = info.saved_frames_total || 0;
+                      let totalChunks = info.total_chunks || 0;
+                      let totalLabeled = info.total_labeled_frames || 0;
+
+                      let html = "<ul>";
+                      for (const label in savedFrames) {
+                          html += "<li>" + label + ": " + savedFrames[label] + " frames saved</li>";
+                      }
+                      html += "</ul>";
+                      html += "<p><strong>Total Saved:</strong> " + totalSaved + "</p>";
+                      html += "<p><strong>Total Chunks:</strong> " + totalChunks + "</p>";
+                      html += "<p><strong>Total Labeled Frames (chunks logic):</strong> " + totalLabeled + "</p>";
+
+                      document.getElementById('summaryContainer').innerHTML = html;
+                  })
+                  .catch(err => console.log(err));
+          }
+      });
+}
+
+setInterval(updateSummary, 2000);
+</script>
+</body>
+</html>
