@@ -18,3 +18,14 @@ Here are the steps to run the validation GUI. The purpose is for getting the gro
 - Python 3.11.10
 - pip install yt-dlp (for downloading YouTube links)
 - pip install flask (for validation GUI)
+
+## Update:
+Successfully labeled first video, and marked 2 potential crashes. After the video finished processing, the program
+saved the 2 crash clips along with a crash log marking the time of crash in a folder.
+## Crash Log
+<img width="689" height="158" alt="image" src="https://github.com/user-attachments/assets/8eb10fe3-6e28-4687-97f3-8c62a53b894f" />
+
+## Saved Folder
+<img width="508" height="181" alt="image" src="https://github.com/user-attachments/assets/938245ed-981c-478c-bf67-f7278f528f3e" />
+
+
