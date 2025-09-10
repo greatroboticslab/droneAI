@@ -1,81 +1,31 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Streaming Video</title>
+    <title>Validation Results</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <div class="container">
-    <h1>Video Stream - Mark Observations</h1>
+    <h1>Validation Results</h1>
 
-    <div class="video-container">
-        <img id="video" src="{{ url_for('validation_video_feed') }}" width="640" height="360" />
-    </div>
+    <p><strong>Total Events Observed:</strong> {{ total_events }}</p>
 
-    <div style="margin-top: 20px;">
-        <button id="rewindBtn">&lt;&lt; Rewind 10s</button>
-        <button id="pauseBtn">Pause</button>
-        <button id="forwardBtn">Forward 10s &gt;&gt;</button>
-        <button id="crashBtn">Mark Observation</button>
-    </div>
+    {% if events %}
+        <h2>Event Breakdown</h2>
+        <ul>
+        {% for event in events %}
+            <li>
+                <strong>{{ event.type|capitalize }} #{{ event.index }}</strong> :
+                [{{ event.start }} - {{ event.end }}]
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>No events were marked during this session.</p>
+    {% endif %}
 
-    <p id="crashCountDisplay">Total Observations: 0</p>
-
-    <div class="page-footer">
-        Created by Ethan Stanks 2025. 
-        <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
-    </div>
+    <br>
+    <a href="/">Back to Home</a>
 </div>
-
-<script>
-let paused = false;
-
-document.getElementById('crashBtn').addEventListener('click', function() {
-    if (!paused) {
-        fetch('/mark_crash', { method: 'POST' })
-            .then(() => {
-                fetch('/get_crash_count')
-                    .then(r => r.text())
-                    .then(count => {
-                        document.getElementById('crashCountDisplay').innerText =
-                            "Total Crashes: " + count;
-                    });
-            });
-    }
-});
-
-document.getElementById('pauseBtn').addEventListener('click', function() {
-    fetch('/toggle_pause', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            paused = data.paused;
-            if (paused) {
-                document.getElementById('pauseBtn').innerText = "Resume";
-                document.getElementById('crashBtn').disabled = true;
-            } else {
-                document.getElementById('pauseBtn').innerText = "Pause";
-                document.getElementById('crashBtn').disabled = false;
-            }
-        });
-});
-
-document.getElementById('rewindBtn').addEventListener('click', function() {
-    fetch('/rewind', { method: 'POST' });
-});
-
-document.getElementById('forwardBtn').addEventListener('click', function() {
-    fetch('/fast_forward', { method: 'POST' });
-});
-
-setInterval(function() {
-    fetch('/check_status')
-        .then(r => r.text())
-        .then(data => {
-            if (data === "done") {
-                window.location.href = "/final_results";
-            }
-        });
-}, 2000);
-</script>
 </body>
 </html>
