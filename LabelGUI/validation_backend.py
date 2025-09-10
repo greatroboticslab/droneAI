@@ -8,10 +8,9 @@ import video_utils
 
 _processing_thread = None
 _video_done = False
-_crash_count = 0
 _log_file_path = None
 _delete_original = False
-_event_times = []   
+_event_times = []     # Stores (idx, event_type, time_sec)
 _video_duration = 0.0
 
 _extraction_in_progress = False
@@ -21,22 +20,16 @@ _extraction_total = 0
 
 def start_validation_thread(youtube_link, folder_name, delete_original):
     """
-    The old start_processing_thread logic, but specifically for Validation.
+    Starts validation: downloads video, prepares log file, spawns processing thread.
     """
-    global _processing_thread
-    global _video_done
-    global _crash_count
-    global _log_file_path
-    global _delete_original
-    global _crash_times
-    global _video_duration
+    global _processing_thread, _video_done, _log_file_path
+    global _delete_original, _event_times, _video_duration
 
     if _processing_thread and _processing_thread.is_alive():
         return
 
     _video_done = False
-    _crash_count = 0
-    _crash_times = []
+    _event_times = []
     _video_duration = 0.0
     _delete_original = delete_original
 
@@ -50,7 +43,7 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
     target_folder = get_unique_folder_name(results_dir, folder_name)
     os.makedirs(target_folder, exist_ok=True)
 
-    _log_file_path = os.path.join(target_folder, "crash_log.txt")
+    _log_file_path = os.path.join(target_folder, "event_log.txt")
 
     downloaded_filepath = download_video(youtube_link, youtube_downloads_dir)
     if not downloaded_filepath:
@@ -76,7 +69,7 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
         else:
             fps = 30.0
 
-        multiple_pass_extract(downloaded_filepath, target_folder, _crash_times, fps)
+        multiple_pass_extract(downloaded_filepath, target_folder, _event_times, fps)
 
         if _delete_original and os.path.exists(downloaded_filepath):
             os.remove(downloaded_filepath)
@@ -84,8 +77,7 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
         with open(_log_file_path, 'a') as f:
             f.write(f"\nTotal Events Observed: {len(_event_times)}\n")
 
-
-        finalize_video(target_folder, _crash_count)
+        finalize_video(target_folder)
 
     _processing_thread = threading.Thread(target=video_thread, daemon=True)
     _processing_thread.start()
@@ -93,9 +85,8 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
 
 def generate_video_stream():
     """
-    The old generate_video_stream logic, but using video_utils for pause/skip.
+    Streams video frames with overlay (time info).
     """
-    import video_utils
     global _video_done, _video_duration
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -159,6 +150,9 @@ def generate_video_stream():
 
 
 def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
+    """
+    Extracts short clips (5s: 2 before, 3 after) for each marked event.
+    """
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
     if not event_times_list:
@@ -222,27 +216,28 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
     _extraction_in_progress = False
 
 
-
 def mark_event_now(event_type: str):
+    """
+    Records an event with its timestamp.
+    """
     global _event_times
     idx = len(_event_times) + 1
     current_time_sec = video_utils.get_current_time_sec()
     _event_times.append((idx, event_type, current_time_sec))
 
 
-
 def is_video_done():
     return _video_done
 
 
-def finalize_video(target_folder, crash_count):
+def finalize_video(target_folder):
     global _video_done
     _video_done = True
 
 
 def get_crash_count():
+    # returns number of events for compatibility
     return len(_event_times)
-
 
 
 def get_log_file_path():
@@ -292,6 +287,7 @@ def get_extraction_progress():
         "total": _extraction_total
     }
 
+
 def skip_video(offset_seconds: float):
     video_utils.schedule_skip(offset_seconds)
 
@@ -303,7 +299,6 @@ def toggle_pause():
 def get_logged_events():
     """
     Returns a list of events in structured form for rendering in HTML.
-    Each event: { "index": N, "type": "takeoff", "start": "0:00:05", "end": "0:00:10" }
     """
     results = []
     for (idx, event_type, ctime) in _event_times:
@@ -316,4 +311,3 @@ def get_logged_events():
             "end": sec_to_hms(end_sec)
         })
     return results
-
