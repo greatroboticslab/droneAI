@@ -6,7 +6,7 @@ from validation_backend import (
     start_validation_thread,
     get_crash_count,
     get_log_file_path,
-    mark_crash_now,
+    mark_event_now,
     is_video_done,
     get_extraction_progress,
     toggle_pause,
