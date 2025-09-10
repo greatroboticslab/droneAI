@@ -241,7 +241,8 @@ def finalize_video(target_folder, crash_count):
 
 
 def get_crash_count():
-    return _crash_count
+    return len(_event_times)
+
 
 
 def get_log_file_path():
