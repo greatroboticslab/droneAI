@@ -11,7 +11,7 @@ _video_done = False
 _crash_count = 0
 _log_file_path = None
 _delete_original = False
-_crash_times = []
+_event_times = []   
 _video_duration = 0.0
 
 _extraction_in_progress = False
@@ -82,7 +82,8 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
             os.remove(downloaded_filepath)
 
         with open(_log_file_path, 'a') as f:
-            f.write(f"\nTotal Crashes Observed: {_crash_count}\n")
+            f.write(f"\nTotal Events Observed: {len(_event_times)}\n")
+
 
         finalize_video(target_folder, _crash_count)
 
@@ -157,32 +158,32 @@ def generate_video_stream():
     _video_done = True
 
 
-def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
+def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
-    if not crash_times_list:
+    if not event_times_list:
         return
 
-    sorted_times = sorted(crash_times_list, key=lambda x: x[1])
+    sorted_times = sorted(event_times_list, key=lambda x: x[2])  # sort by time
 
     _extraction_in_progress = True
     _extraction_current = 0
     _extraction_total = len(sorted_times)
 
     with open(_log_file_path, 'a') as lf:
-        for (idx, ctime) in sorted_times:
+        for (idx, event_type, ctime) in sorted_times:
             _extraction_current += 1
 
-            start_sec = max(0, ctime - 10)
-            end_sec = ctime + 10
-            lf.write(f"Crash #{idx}: [{sec_to_hms(start_sec)} - {sec_to_hms(end_sec)}]\n")
+            start_sec = max(0, ctime - 2)
+            end_sec = ctime + 3
+            lf.write(f"{event_type.capitalize()} #{idx}: [{sec_to_hms(start_sec)} - {sec_to_hms(end_sec)}]\n")
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 continue
 
             cap.set(cv2.CAP_PROP_POS_MSEC, start_sec * 1000)
-            out_filename = os.path.join(target_folder, f"crash_{idx:02d}.mp4")
+            out_filename = os.path.join(target_folder, f"{event_type}_{idx:02d}.mp4")
             writer = None
 
             while True:
@@ -201,7 +202,7 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     writer = cv2.VideoWriter(out_filename, fourcc, fps, (w, h))
 
-                overlay_text = f"Crash #{idx}, T={sec_to_hms(current_time_sec)}"
+                overlay_text = f"{event_type.capitalize()} #{idx}, T={sec_to_hms(current_time_sec)}"
                 frame_copy = frame.copy()
                 cv2.putText(
                     frame_copy,
@@ -221,11 +222,13 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
     _extraction_in_progress = False
 
 
-def mark_crash_now():
-    global _crash_count, _crash_times
+
+def mark_event_now(event_type: str):
+    global _event_times
+    idx = len(_event_times) + 1
     current_time_sec = video_utils.get_current_time_sec()
-    _crash_count += 1
-    _crash_times.append((_crash_count, current_time_sec))
+    _event_times.append((idx, event_type, current_time_sec))
+
 
 
 def is_video_done():
