@@ -297,3 +297,22 @@ def skip_video(offset_seconds: float):
 
 def toggle_pause():
     return video_utils.toggle_pause_flag()
+
+
+def get_logged_events():
+    """
+    Returns a list of events in structured form for rendering in HTML.
+    Each event: { "index": N, "type": "takeoff", "start": "0:00:05", "end": "0:00:10" }
+    """
+    results = []
+    for (idx, event_type, ctime) in _event_times:
+        start_sec = max(0, ctime - 2)
+        end_sec = ctime + 3
+        results.append({
+            "index": idx,
+            "type": event_type,
+            "start": sec_to_hms(start_sec),
+            "end": sec_to_hms(end_sec)
+        })
+    return results
+
