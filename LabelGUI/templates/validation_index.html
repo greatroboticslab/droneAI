@@ -28,6 +28,25 @@
         <button>Back to Home</button>
     </a>
 
+    <!-- NEW CONTROLS (these will show once video is running) -->
+    <div class="controls">
+        <h2>Mark Events</h2>
+        <button onclick="markEvent('takeoff')">Mark Take-off</button>
+        <button onclick="markEvent('land')">Mark Land</button>
+        <button onclick="markEvent('minor-crash')">Mark Minor Crash</button>
+        <button onclick="markEvent('severe-crash')">Mark Severe Crash</button>
+    </div>
+
+    <script>
+    function markEvent(eventType) {
+        fetch('/mark_event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event: eventType })
+        }).then(r => console.log("Marked event:", eventType));
+    }
+    </script>
+
     <div class="page-footer">
         Created by Ethan Stanks 2025. 
         <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
@@ -35,3 +54,4 @@
 </div>
 </body>
 </html>
+
