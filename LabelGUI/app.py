@@ -58,7 +58,14 @@ def validation_index():
 
 @app.route('/validation_view_stream')
 def validation_view_stream():
-    return render_template('validation_results.html')
+    from validation_backend import get_logged_events
+    events = get_logged_events()  # new helper we’ll add
+    return render_template(
+        'validation_results.html',
+        total_events=len(events),
+        events=events
+    )
+
 
 
 @app.route('/validation_video_feed')
