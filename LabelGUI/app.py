@@ -70,10 +70,14 @@ def validation_video_feed():
     )
 
 
-@app.route('/mark_crash', methods=['POST'])
-def mark_crash():
-    mark_crash_now()
-    return ('', 204)
+@app.route('/mark_event', methods=['POST'])
+def mark_event():
+    data = request.get_json()
+    event_type = data.get('event', 'unknown')
+    from validation_backend import mark_event_now
+    mark_event_now(event_type)
+    return jsonify(success=True, event=event_type)
+
 
 
 @app.route('/check_status')
