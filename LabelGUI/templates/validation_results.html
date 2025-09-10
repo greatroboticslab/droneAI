@@ -1,31 +1,60 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Validation Results</title>
+    <title>Validation - Mark Events</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 <div class="container">
-    <h1>Validation Results</h1>
+    <h1>Video Stream - Mark Events</h1>
 
-    <p><strong>Total Events Observed:</strong> {{ total_events }}</p>
+    <!-- Video player -->
+    <img src="{{ url_for('validation_video_feed') }}" width="800">
 
-    {% if events %}
-        <h2>Event Breakdown</h2>
-        <ul>
-        {% for event in events %}
-            <li>
-                <strong>{{ event.type|capitalize }} #{{ event.index }}</strong> :
-                [{{ event.start }} - {{ event.end }}]
-            </li>
-        {% endfor %}
-        </ul>
-    {% else %}
-        <p>No events were marked during this session.</p>
-    {% endif %}
+    <br><br>
+    <!-- Playback controls -->
+    <button onclick="rewind()"><< Rewind 10s</button>
+    <button onclick="togglePause()">Pause/Resume</button>
+    <button onclick="forward()">Forward 10s >></button>
+
+    <br><br>
+    <!-- Event buttons -->
+    <h2>Mark Events</h2>
+    <button onclick="markEvent('takeoff')">Mark Take-off</button>
+    <button onclick="markEvent('land')">Mark Land</button>
+    <button onclick="markEvent('minor-crash')">Mark Minor Crash</button>
+    <button onclick="markEvent('severe-crash')">Mark Severe Crash</button>
+
+    <p>Total Events Observed: <span id="eventCount">0</span></p>
 
     <br>
     <a href="/">Back to Home</a>
 </div>
+
+<script>
+function markEvent(eventType) {
+    fetch('/mark_event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: eventType })
+    }).then(() => updateCount());
+}
+
+function updateCount() {
+    fetch('/get_crash_count')
+        .then(r => r.text())
+        .then(txt => { document.getElementById("eventCount").innerText = txt; });
+}
+
+function rewind() {
+    fetch('/rewind', { method: 'POST' });
+}
+function forward() {
+    fetch('/fast_forward', { method: 'POST' });
+}
+function togglePause() {
+    fetch('/toggle_pause', { method: 'POST' });
+}
+</script>
 </body>
 </html>
