@@ -15,22 +15,29 @@ Here are the steps to run this codebase in Docker:
 
 ## Steps To Run:
 1. Clone the directory
+
    git clone https://github.com/greatroboticslab/droneAI.git
 
-2. Get in the folder
+3. Get in the folder
+   
    cd droneAI
 
-3. Activate a virtual enviornment
+5. Activate a virtual enviornment
+   
    python -m venv venv
+   
    source venv/Scripts/activate
 
-4. Install Dependencies
+7. Install Dependencies
+   
    pip install flask yt-dlp ultralytics
 
-5. Run the file
+9. Run the file
+    
    python LabelGUI/app.py
 
-6. Open the website:
+11. Open the website:
+    
    http://localhost:5000/
 
 You should then see the GUI:
@@ -42,6 +49,7 @@ You should then see the GUI:
 <img width="1043" height="447" alt="image" src="https://github.com/user-attachments/assets/39dda6c4-3f39-46f4-930d-6385ce96a25d" />
 
 Check on "Delete original downloaded video after processing"
+
 Press "Start Processing"
 
 10. Click on "Mark Observation" whenever you see a crash
