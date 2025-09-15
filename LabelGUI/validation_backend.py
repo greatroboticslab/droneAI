@@ -151,7 +151,8 @@ def generate_video_stream():
 
 def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
     """
-    Extracts short clips (5s: 2 before, 3 after) for each marked event.
+    Extracts short clips based on frames (not seconds).
+    Each clip = N frames before and after the marked event.
     """
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
@@ -168,15 +169,25 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
         for (idx, event_type, ctime) in sorted_times:
             _extraction_current += 1
 
-            start_sec = max(0, ctime - 2)
-            end_sec = ctime + 3
-            lf.write(f"{event_type.capitalize()} #{idx}: [{sec_to_hms(start_sec)} - {sec_to_hms(end_sec)}]\n")
-
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 continue
 
-            cap.set(cv2.CAP_PROP_POS_MSEC, start_sec * 1000)
+            # --- FRAME-BASED WINDOW ---
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            event_frame = int(ctime * fps)
+
+            frame_window = 15   # 15 before + 15 after = 30 frames total (~1 sec at 30fps)
+            start_frame = max(0, event_frame - frame_window)
+            end_frame = event_frame + frame_window
+
+            # Log entry: show frames + approximate times
+            lf.write(
+                f"{event_type.capitalize()} #{idx}: [Frames {start_frame}-{end_frame}] "
+                f"(~{sec_to_hms(start_frame/fps)} - {sec_to_hms(end_frame/fps)})\n"
+            )
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
             out_filename = os.path.join(target_folder, f"{event_type}_{idx:02d}.mp4")
             writer = None
 
@@ -185,18 +196,16 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
                 if not ret:
                     break
 
-                current_time_sec = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-                if current_time_sec > end_sec:
+                current_frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if current_frame_idx > end_frame:
                     break
-                if current_time_sec < start_sec:
-                    continue
 
                 if writer is None:
                     h, w, _ = frame.shape
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     writer = cv2.VideoWriter(out_filename, fourcc, fps, (w, h))
 
-                overlay_text = f"{event_type.capitalize()} #{idx}, T={sec_to_hms(current_time_sec)}"
+                overlay_text = f"{event_type.capitalize()} #{idx}, Frame={current_frame_idx}"
                 frame_copy = frame.copy()
                 cv2.putText(
                     frame_copy,
@@ -214,7 +223,6 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
             cap.release()
 
     _extraction_in_progress = False
-
 
 def mark_event_now(event_type: str):
     """
