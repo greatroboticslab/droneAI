@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Select Entry to Label</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="container">
+  <h1>Select a Video to Label</h1>
+
+  {% if entries and entries|length > 0 %}
+    <form method="POST" action="/start_from_excel">
+      <label for="entry_id">Entry:</label>
+      <select id="entry_id" name="entry_id" required>
+        {% for e in entries %}
+          <option value="{{ e.id }}">{{ e.person }} — {{ e.link }}</option>
+        {% endfor %}
+      </select>
+
+      <br><br>
+      <label for="scenario_base">Session Type:</label>
+      <select id="scenario_base" name="scenario_base" required>
+        <option value="Simulation">Simulation</option>
+        <option value="Real flight">Real flight</option>
+      </select>
+
+      <br><br>
+      <input type="checkbox" id="delete_original" name="delete_original">
+      <label for="delete_original">Delete original downloaded video after processing</label>
+
+      <br><br>
+      <button type="submit">Start Labeling</button>
+    </form>
+  {% else %}
+    <p>No entries loaded. Please <a href="/import_excel">import an Excel file</a> first.</p>
+  {% endif %}
+
+  <br>
+  <a href="/">Back to Home</a>
+</div>
+</body>
+</html>
