@@ -10,7 +10,7 @@ _processing_thread = None
 _video_done = False
 _log_file_path = None
 _delete_original = False
-_event_times = []     # Stores (idx, event_type, time_sec)
+_event_times = []     # (idx, event_type, time_sec)
 _video_duration = 0.0
 
 _extraction_in_progress = False
@@ -26,10 +26,10 @@ def start_validation_thread(
     scenario_base=None  # "Simulation" or "Real flight"
 ):
     """
-    Start validation flow. If person_name and scenario_base are provided, the
-    output folder becomes:
-      ValidationResults/<first 4 chars of person_name>/<scenario_base N>/
-    Otherwise it falls back to unique-folder-by-name behavior with `folder_name`.
+    If person_name & scenario_base provided:
+      ValidationResults/<first 4 chars>/<scenario_base N>/
+    Else:
+      ValidationResults/<unique folder_name/>
     """
     global _processing_thread, _video_done, _log_file_path
     global _delete_original, _event_times, _video_duration
@@ -49,21 +49,17 @@ def start_validation_thread(
     results_dir = os.path.join(base_dir, 'ValidationResults')
     os.makedirs(results_dir, exist_ok=True)
 
-    # --- Compute target folder path ---
+    # target folder
     if person_name and scenario_base:
         prefix = (person_name or "").strip()[:4] or "User"
         person_dir = os.path.join(results_dir, prefix)
         os.makedirs(person_dir, exist_ok=True)
-
-        # find next index for scenario_base
         existing = [d for d in os.listdir(person_dir) if os.path.isdir(os.path.join(person_dir, d))]
-        # Count only those that start with scenario_base (case-insensitive)
         count = sum(1 for d in existing if d.lower().startswith(scenario_base.lower()))
         scenario_dir_name = f"{scenario_base} {count + 1}"
         target_folder = os.path.join(person_dir, scenario_dir_name)
         os.makedirs(target_folder, exist_ok=True)
     else:
-        # legacy/manual path: use provided folder_name under ValidationResults
         if not folder_name:
             folder_name = "Session"
         target_folder = get_unique_folder_name(results_dir, folder_name)
@@ -79,7 +75,7 @@ def start_validation_thread(
         return
 
     def video_thread():
-        nonlocal downloaded_filepath, target_folder, youtube_link
+        nonlocal downloaded_filepath, target_folder, youtube_link, base_dir
 
         with open(_log_file_path, 'w') as f:
             f.write(f"YouTube Link: {youtube_link}\n")
@@ -110,9 +106,6 @@ def start_validation_thread(
 
 
 def generate_video_stream():
-    """
-    Streams video frames with overlay (time info).
-    """
     global _video_done, _video_duration
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -154,16 +147,8 @@ def generate_video_stream():
     def draw_validation_overlay(frame, current_time_sec):
         elapsed_str = str(timedelta(seconds=int(current_time_sec)))
         total_str = str(timedelta(seconds=int(_video_duration)))
-        overlay_text = f"{elapsed_str} / {total_str}"
-        cv2.putText(
-            frame,
-            overlay_text,
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (0, 255, 0),
-            2
-        )
+        cv2.putText(frame, f"{elapsed_str} / {total_str}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
         return frame
 
     for mjpeg_frame in video_utils.read_video_frames(cap, fps, draw_validation_overlay):
@@ -177,15 +162,14 @@ def generate_video_stream():
 
 def multiple_pass_extract(video_path, target_folder, event_times_list, fps_unused):
     """
-    Extracts short clips based on frames (not seconds).
-    Each clip = 15 frames before and 15 after (~1s at 30fps).
+    Frame-based clips: 15 frames before + 15 after (~1s at 30fps).
     """
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
     if not event_times_list:
         return
 
-    sorted_times = sorted(event_times_list, key=lambda x: x[2])  # sort by time
+    sorted_times = sorted(event_times_list, key=lambda x: x[2])
 
     _extraction_in_progress = True
     _extraction_current = 0
@@ -201,7 +185,7 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_unuse
 
             fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             event_frame = int(ctime * fps)
-            frame_window = 15   # 15 before + 15 after = 30 frames
+            frame_window = 15  # 15 before + 15 after
 
             start_frame = max(0, event_frame - frame_window)
             end_frame = event_frame + frame_window
@@ -231,15 +215,8 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_unuse
 
                 overlay_text = f"{event_type.capitalize()} #{idx}, Frame={current_frame_idx}"
                 frame_copy = frame.copy()
-                cv2.putText(
-                    frame_copy,
-                    overlay_text,
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 0, 255),
-                    2
-                )
+                cv2.putText(frame_copy, overlay_text, (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
                 writer.write(frame_copy)
 
             if writer:
@@ -250,9 +227,6 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_unuse
 
 
 def mark_event_now(event_type: str):
-    """
-    Records an event with its timestamp.
-    """
     global _event_times
     idx = len(_event_times) + 1
     current_time_sec = video_utils.get_current_time_sec()
@@ -269,7 +243,7 @@ def finalize_video(target_folder):
 
 
 def get_crash_count():
-    # returns number of events for compatibility with existing endpoints
+    # return number of events (back-compat name)
     return len(_event_times)
 
 
@@ -330,16 +304,13 @@ def toggle_pause():
 
 
 def get_logged_events():
-    """
-    Returns events for rendering in HTML.
-    """
+    # Light-weight preview for pages; exact window is logged in event_log.txt
     results = []
-    # Note: frame window and exact times are computed on extraction/log only.
     for (idx, event_type, ctime) in _event_times:
         results.append({
             "index": idx,
             "type": event_type,
-            "start": sec_to_hms(max(0, ctime - 1)),  # rough preview
+            "start": sec_to_hms(max(0, ctime - 1)),
             "end": sec_to_hms(ctime + 1)
         })
     return results
