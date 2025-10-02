@@ -8,14 +8,14 @@
 <div class="container">
     <h1>Video Stream - Mark Events</h1>
 
-    <!-- Video player -->
+    <!-- Video feed -->
     <img src="{{ url_for('validation_video_feed') }}" width="800">
 
     <br><br>
     <!-- Playback controls -->
-    <button onclick="rewind()"><< Rewind 10s</button>
+    <button onclick="rewind()">&laquo; Rewind 10s</button>
     <button onclick="togglePause()">Pause/Resume</button>
-    <button onclick="forward()">Forward 10s >></button>
+    <button onclick="forward()">Forward 10s &raquo;</button>
 
     <br><br>
     <!-- Event buttons -->
@@ -28,7 +28,7 @@
     <p>Total Events Observed: <span id="eventCount">0</span></p>
 
     <br>
-    <a href="/">Back to Home</a>
+    <a href="/"><button type="button">Back to Home</button></a>
 </div>
 
 <script>
@@ -46,15 +46,12 @@ function updateCount() {
         .then(txt => { document.getElementById("eventCount").innerText = txt; });
 }
 
-function rewind() {
-    fetch('/rewind', { method: 'POST' });
-}
-function forward() {
-    fetch('/fast_forward', { method: 'POST' });
-}
-function togglePause() {
-    fetch('/toggle_pause', { method: 'POST' });
-}
+function rewind() { fetch('/rewind', { method: 'POST' }); }
+function forward() { fetch('/fast_forward', { method: 'POST' }); }
+function togglePause() { fetch('/toggle_pause', { method: 'POST' }); }
+
+// Refresh count every few seconds
+setInterval(updateCount, 2000);
 </script>
 </body>
 </html>
