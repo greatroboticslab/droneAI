@@ -18,9 +18,18 @@ _extraction_current = 0
 _extraction_total = 0
 
 
-def start_validation_thread(youtube_link, folder_name, delete_original):
+def start_validation_thread(
+    youtube_link,
+    folder_name=None,
+    delete_original=False,
+    person_name=None,
+    scenario_base=None  # "Simulation" or "Real flight"
+):
     """
-    Starts validation: downloads video, prepares log file, spawns processing thread.
+    Start validation flow. If person_name and scenario_base are provided, the
+    output folder becomes:
+      ValidationResults/<first 4 chars of person_name>/<scenario_base N>/
+    Otherwise it falls back to unique-folder-by-name behavior with `folder_name`.
     """
     global _processing_thread, _video_done, _log_file_path
     global _delete_original, _event_times, _video_duration
@@ -40,8 +49,25 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
     results_dir = os.path.join(base_dir, 'ValidationResults')
     os.makedirs(results_dir, exist_ok=True)
 
-    target_folder = get_unique_folder_name(results_dir, folder_name)
-    os.makedirs(target_folder, exist_ok=True)
+    # --- Compute target folder path ---
+    if person_name and scenario_base:
+        prefix = (person_name or "").strip()[:4] or "User"
+        person_dir = os.path.join(results_dir, prefix)
+        os.makedirs(person_dir, exist_ok=True)
+
+        # find next index for scenario_base
+        existing = [d for d in os.listdir(person_dir) if os.path.isdir(os.path.join(person_dir, d))]
+        # Count only those that start with scenario_base (case-insensitive)
+        count = sum(1 for d in existing if d.lower().startswith(scenario_base.lower()))
+        scenario_dir_name = f"{scenario_base} {count + 1}"
+        target_folder = os.path.join(person_dir, scenario_dir_name)
+        os.makedirs(target_folder, exist_ok=True)
+    else:
+        # legacy/manual path: use provided folder_name under ValidationResults
+        if not folder_name:
+            folder_name = "Session"
+        target_folder = get_unique_folder_name(results_dir, folder_name)
+        os.makedirs(target_folder, exist_ok=True)
 
     _log_file_path = os.path.join(target_folder, "event_log.txt")
 
@@ -57,7 +83,7 @@ def start_validation_thread(youtube_link, folder_name, delete_original):
 
         with open(_log_file_path, 'w') as f:
             f.write(f"YouTube Link: {youtube_link}\n")
-            f.write(f"Folder: {os.path.basename(target_folder)}\n\n")
+            f.write(f"Folder: {os.path.relpath(target_folder, base_dir)}\n\n")
 
         while not _video_done:
             time.sleep(0.5)
@@ -149,10 +175,10 @@ def generate_video_stream():
     _video_done = True
 
 
-def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
+def multiple_pass_extract(video_path, target_folder, event_times_list, fps_unused):
     """
     Extracts short clips based on frames (not seconds).
-    Each clip = N frames before and after the marked event.
+    Each clip = 15 frames before and 15 after (~1s at 30fps).
     """
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
@@ -173,18 +199,16 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
             if not cap.isOpened():
                 continue
 
-            # --- FRAME-BASED WINDOW ---
             fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             event_frame = int(ctime * fps)
+            frame_window = 15   # 15 before + 15 after = 30 frames
 
-            frame_window = 15   # 15 before + 15 after = 30 frames total (~1 sec at 30fps)
             start_frame = max(0, event_frame - frame_window)
             end_frame = event_frame + frame_window
 
-            # Log entry: show frames + approximate times
             lf.write(
                 f"{event_type.capitalize()} #{idx}: [Frames {start_frame}-{end_frame}] "
-                f"(~{sec_to_hms(start_frame/fps)} - {sec_to_hms(end_frame/fps)})\n"
+                f"(~{sec_to_hms(start_frame/fps)} - ~{sec_to_hms(end_frame/fps)})\n"
             )
 
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -224,6 +248,7 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps):
 
     _extraction_in_progress = False
 
+
 def mark_event_now(event_type: str):
     """
     Records an event with its timestamp.
@@ -244,7 +269,7 @@ def finalize_video(target_folder):
 
 
 def get_crash_count():
-    # returns number of events for compatibility
+    # returns number of events for compatibility with existing endpoints
     return len(_event_times)
 
 
@@ -306,16 +331,15 @@ def toggle_pause():
 
 def get_logged_events():
     """
-    Returns a list of events in structured form for rendering in HTML.
+    Returns events for rendering in HTML.
     """
     results = []
+    # Note: frame window and exact times are computed on extraction/log only.
     for (idx, event_type, ctime) in _event_times:
-        start_sec = max(0, ctime - 2)
-        end_sec = ctime + 3
         results.append({
             "index": idx,
             "type": event_type,
-            "start": sec_to_hms(start_sec),
-            "end": sec_to_hms(end_sec)
+            "start": sec_to_hms(max(0, ctime - 1)),  # rough preview
+            "end": sec_to_hms(ctime + 1)
         })
     return results
