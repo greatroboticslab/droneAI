@@ -1,14 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drone Crash Validation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
 <div class="container">
     <h1>Validation Marking</h1>
 
-    <!-- 👇 Add this block here -->
+    <!-- Excel importer entry point -->
     <p style="margin-bottom: 20px;">
-      Or, if you want to load videos from an Excel sheet:
+      Or load videos from an Excel sheet:
       <a href="/import_excel">
-        <button type="button">📁 Import Excel and Pick Entry</button>
+        <button type="button">📁 Import Excel & Pick Entry</button>
       </a>
     </p>
-    <!-- 👆 End added block -->
 
     <form method="POST" action="/validation_index">
         <label for="youtube_link">YouTube Link:</label>
@@ -27,6 +33,13 @@
 
     <br><br>
     <a href="/">
-        <button>Back to Home</button>
+        <button type="button">Back to Home</button>
     </a>
+
+    <div class="page-footer">
+        Created by Ethan Stanks 2025.
+        <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
+    </div>
 </div>
+</body>
+</html>
