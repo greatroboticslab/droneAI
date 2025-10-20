@@ -168,8 +168,23 @@ def import_excel():
 
 @app.route('/pick_from_excel', methods=['GET'])
 def pick_from_excel():
+    from validation_backend import get_progress_summary
     global EXCEL_ENTRIES
-    return render_template('validation_pick.html', entries=EXCEL_ENTRIES)
+    progress = get_progress_summary()  # { "John": {"sessions":2,"total_events":5}, ... }
+    # decorate entries with status based on prefix presence
+    decorated = []
+    for e in EXCEL_ENTRIES:
+        prefix = (e["person"] or "").strip()[:4] or "User"
+        rec = progress.get(prefix, {"sessions": 0, "total_events": 0})
+        decorated.append({
+            **e,
+            "prefix": prefix,
+            "sessions": rec["sessions"],
+            "total_events": rec["total_events"],
+            "labeled": rec["sessions"] > 0  # green if they have at least 1 session
+        })
+    return render_template('validation_pick.html', entries=decorated)
+
 
 
 @app.route('/start_from_excel', methods=['POST'])
