@@ -100,6 +100,17 @@ def start_validation_thread(
 
         with open(_log_file_path, 'a') as f:
             f.write(f"\nTotal Events Observed: {len(_event_times)}\n")
+        try:
+            update_progress_record(
+                person_name=person_name,
+                youtube_link=youtube_link,
+                scenario_base=scenario_base,
+                target_folder=target_folder,
+                events_count=len(_event_times)
+            )
+        except Exception:
+            pass
+
 
         finalize_video(target_folder)
 
