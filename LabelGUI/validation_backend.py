@@ -5,6 +5,8 @@ import threading
 import time
 from datetime import timedelta
 import video_utils
+import json
+from datetime import datetime
 
 _processing_thread = None
 _video_done = False
@@ -314,3 +316,78 @@ def get_logged_events():
             "end": sec_to_hms(ctime + 1)
         })
     return results
+
+def _progress_path():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    results_dir = os.path.join(base_dir, 'ValidationResults')
+    os.makedirs(results_dir, exist_ok=True)
+    return os.path.join(results_dir, "progress.json")
+
+def _load_progress():
+    path = _progress_path()
+    if not os.path.exists(path):
+        return {"updated_at": None, "people": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"updated_at": None, "people": {}}
+
+def _save_progress(data):
+    data["updated_at"] = datetime.utcnow().isoformat()
+    with open(_progress_path(), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+def _count_clips(folder):
+    try:
+        return sum(1 for f in os.listdir(folder) if f.lower().endswith(".mp4"))
+    except Exception:
+        return 0
+
+def update_progress_record(person_name, youtube_link, scenario_base, target_folder, events_count):
+    """Update progress.json after a session finishes."""
+    if not person_name or not scenario_base:
+        return  # only track Excel-driven sessions
+
+    prefix = (person_name or "").strip()[:4] or "User"
+    data = _load_progress()
+
+    if "people" not in data:
+        data["people"] = {}
+    if prefix not in data["people"]:
+        data["people"][prefix] = {
+            "full_names": list({person_name}),
+            "sessions": [],
+            "total_events": 0
+        }
+    else:
+        # remember full names we’ve seen for this prefix
+        names = set(data["people"][prefix].get("full_names", []))
+        names.add(person_name)
+        data["people"][prefix]["full_names"] = sorted(names)
+
+    clip_count = _count_clips(target_folder)
+    session = {
+        "scenario": scenario_base,
+        "folder": os.path.relpath(target_folder, os.path.dirname(os.path.abspath(__file__))),
+        "youtube_link": youtube_link,
+        "events": int(events_count),
+        "clips": int(clip_count),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    data["people"][prefix]["sessions"].append(session)
+    data["people"][prefix]["total_events"] = int(data["people"][prefix].get("total_events", 0)) + int(events_count)
+
+    _save_progress(data)
+
+def get_progress_summary():
+    """Lightweight summary for UI: { prefix: {sessions:int, total_events:int} }"""
+    data = _load_progress()
+    out = {}
+    for prefix, rec in data.get("people", {}).items():
+        out[prefix] = {
+            "sessions": len(rec.get("sessions", [])),
+            "total_events": int(rec.get("total_events", 0))
+        }
+    return out
+
