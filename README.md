@@ -5,6 +5,9 @@ It allows multiple event types to be labeled during video playback, saves short 
 
 ✨ **New features** include Excel-based participant import, multiple event categories (take-off, landing, minor crash, severe crash), 5–10 second clips, and JSON-based labeling progress tracking with green/red status indicators.
 
+
+TO VIEW A VIDEO TUTORIAL, PLEASE USE THE FOLLOWING LINK:
+https://drive.google.com/file/d/1n2QV3i8Uu2Idkk8cB5M0XKKU3GoeiF1J/view?usp=sharing
 ---
 
 ## 🧭 Table of Contents
