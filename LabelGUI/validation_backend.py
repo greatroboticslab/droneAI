@@ -277,22 +277,72 @@ def get_unique_folder_name(parent_dir, base_name):
 
 
 def download_video(youtube_link, download_folder):
-    ydl_opts = {
+    """
+    Robust downloader using yt_dlp:
+      - Try preferred mp4 format first.
+      - If not available, fall back to best available format and let yt-dlp
+        postprocess (ffmpeg) to merge into .mp4.
+    Requires: ffmpeg on PATH for merging audio+video.
+    Returns the full path to the downloaded file, or None on failure.
+    """
+    os.makedirs(download_folder, exist_ok=True)
+
+    # Primary preferred options (mp4 if possible)
+    ydl_opts_primary = {
         'outtmpl': os.path.join(download_folder, '%(title).50s.%(ext)s'),
-        'format': 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4'
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'merge_output_format': 'mp4',
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'postprocessors': [{
+            'key': 'FFmpegEmbedSubtitle',  # harmless if no subtitles
+        }],
     }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_link, download=True)
-            if info.get('_filename'):
-                return info['_filename']
-            else:
+
+    # Fallback options (be more permissive)
+    ydl_opts_fallback = {
+        'outtmpl': os.path.join(download_folder, '%(title).50s.%(ext)s'),
+        'format': 'bestvideo+bestaudio/best',
+        'merge_output_format': 'mp4',
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        # yt-dlp will automatically use ffmpeg to merge when needed
+    }
+
+    def try_download(opts):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(youtube_link, download=True)
+                # Try to find the resulting filename
+                # yt-dlp may return '_filename' or 'requested_downloads' or 'files'
+                filename = info.get('_filename') or info.get('url')
+                if filename and os.path.exists(filename):
+                    return filename
+                # fallback guess by title/ext
                 title = info.get('title', 'video')
-                guessed_path = os.path.join(download_folder, f"{title[:50]}.mp4")
-                if os.path.exists(guessed_path):
-                    return guessed_path
-    except Exception:
-        pass
+                for ext in ('mp4', 'mkv', 'webm', 'm4a', 'mp3'):
+                    candidate = os.path.join(download_folder, f"{title[:50]}.{ext}")
+                    if os.path.exists(candidate):
+                        return candidate
+        except Exception as e:
+            print("[download_video] yt-dlp attempt failed:", e)
+        return None
+
+    # First try preferred mp4-friendly option
+    path = try_download(ydl_opts_primary)
+    if path:
+        print("[download_video] primary succeeded:", path)
+        return path
+
+    # Then try the fallback permissive option
+    path = try_download(ydl_opts_fallback)
+    if path:
+        print("[download_video] fallback succeeded:", path)
+        return path
+
+    print("[download_video] failed to download video for link:", repr(youtube_link))
     return None
 
 
