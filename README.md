@@ -10,6 +10,26 @@ TO VIEW A VIDEO TUTORIAL, PLEASE USE THE FOLLOWING LINK:
 https://drive.google.com/file/d/1n2QV3i8Uu2Idkk8cB5M0XKKU3GoeiF1J/view?usp=sharing
 ---
 
+SCREENSHOTS FOR GUIDANCE:
+<img width="1904" height="876" alt="image" src="https://github.com/user-attachments/assets/7f2c699e-da94-4e77-95a7-7db83290040f" />
+This is the landing page of the GUI. The blue area is where you can view and label videos, and the green is to train the AI based on the labled data.
+
+<img width="1919" height="871" alt="image" src="https://github.com/user-attachments/assets/afd6a9f4-5571-4440-9486-643f4a861d72" />
+Upon clicking on the "Label Validation Data", this is what you see. You can either manually upload a youtube link to process a video, or use our excel sheet by clicking on import excel sheet and selecting our excel file.
+
+<img width="1919" height="605" alt="image" src="https://github.com/user-attachments/assets/c2ac7505-5eae-4617-a40b-4f176bacb018" />
+Upon selecting the excel file, click on "Upload & Parse"
+
+<img width="1899" height="846" alt="image" src="https://github.com/user-attachments/assets/7baa2470-77c0-4587-841e-a8b00578377c" />
+In our excel sheet, we see a long list of videos. The very first column lets us know where the video has already been labeled or not. The next columns are person name, the number of sessions and total events, and the link to the video. Scroll down for options.
+
+<img width="1899" height="847" alt="image" src="https://github.com/user-attachments/assets/a0dc0da0-2bf0-4fed-b5bc-311592501180" />
+In the entry bar, select the video which you want to use. It has the same list as the excel. Then select whether the video you selected is real life or a simulation. Don't check download after processing as we need the original video to compare. Then click on "Start Labeling".
+
+
+
+
+
 ## 🧭 Table of Contents
 
 - [Features](#-features)
