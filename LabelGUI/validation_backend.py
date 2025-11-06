@@ -292,43 +292,73 @@ def get_unique_folder_name(parent_dir, base_name):
 
 
 def download_video(youtube_link, download_folder):
-    youtube_link = _normalize_youtube_url(youtube_link)
+    """
+    Robust YouTube download that copes with SABR/missing-URL issues:
+      1) Try bv*+ba (any container) -> MP4 merge
+      2) Try best[ext=mp4]
+      3) Try explicit 18 (360p mp4 muxed, very compatible)
+      4) Try best
+    Returns absolute file path or None.
+    """
     os.makedirs(download_folder, exist_ok=True)
+
+    # Normalize shorts / youtu.be links (keep your helper if you added it)
+    try:
+        norm = _normalize_youtube_url  # if you added it above
+    except NameError:
+        def norm(u): return (u or "").strip()
+    youtube_link = norm(youtube_link)
 
     FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
 
-    ydl_opts = {
+    # Common opts
+    base = {
         "outtmpl": os.path.join(download_folder, "%(title).50s.%(ext)s"),
-        # Try best video+audio; if separate, yt-dlp will merge with ffmpeg
-        "format": "bestvideo*+bestaudio/best",
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "ffmpeg_location": FFMPEG_DIR,
-        # Helps with some recent YouTube player variants
-        "extractor_args": {"youtube": {"player_client": ["web"]}},
-        # Be tolerant
-        "concurrent_fragment_downloads": 3,
+        # Use android client to dodge SABR missing-url issue
+        "extractor_args": {"youtube": {"player_client": ["android"]}},
         "retries": 5,
+        "concurrent_fragment_downloads": 4,
     }
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_link, download=True)
-            out = info.get("_filename")
-            if out and os.path.exists(out):
-                print("[download_video] downloaded:", out)
-                return out
-            # fallback: guess common extensions by title
-            title = (info.get("title") or "video")[:50]
-            for ext in ("mp4", "mkv", "webm", "m4a"):
-                cand = os.path.join(download_folder, f"{title}.{ext}")
-                if os.path.exists(cand):
-                    print("[download_video] downloaded (guessed):", cand)
-                    return cand
-    except Exception as e:
-        print("[download_video] DOWNLOAD failed:", e)
+    # Ordered strategies (most robust first)
+    strategies = [
+        'bv*+ba/bestvideo*+bestaudio',  # any container, merged to mp4
+        'best[ext=mp4]',                # already-muxed mp4 if available
+        '18',                           # explicit 360p mp4 muxed (reliable)
+        'best'                          # last resort
+    ]
+
+    import yt_dlp
+
+    def try_with(fmt):
+        opts = dict(base)
+        opts["format"] = fmt
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(youtube_link, download=True)
+                out = info.get("_filename")
+                if out and os.path.exists(out):
+                    print(f"[download_video] succeeded with format '{fmt}':", out)
+                    return out
+                title = (info.get("title") or "video")[:50]
+                for ext in ("mp4", "mkv", "webm", "m4a"):
+                    cand = os.path.join(download_folder, f"{title}.{ext}")
+                    if os.path.exists(cand):
+                        print(f"[download_video] succeeded (guessed) with format '{fmt}':", cand)
+                        return cand
+        except Exception as e:
+            print(f"[download_video] attempt with format '{fmt}' failed:", e)
+        return None
+
+    for fmt in strategies:
+        path = try_with(fmt)
+        if path:
+            return path
 
     print("[download_video] failed to download for:", youtube_link)
     return None
