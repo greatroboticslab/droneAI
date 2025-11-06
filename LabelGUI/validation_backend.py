@@ -19,6 +19,21 @@ _extraction_in_progress = False
 _extraction_current = 0
 _extraction_total = 0
 
+import re
+
+def _normalize_youtube_url(url: str) -> str:
+    url = (url or "").strip().strip('"').strip("'")
+    # youtu.be/<id>  -> https://www.youtube.com/watch?v=<id>
+    m = re.match(r'^https?://youtu\.be/([A-Za-z0-9_-]{8,})', url)
+    if m:
+        return f"https://www.youtube.com/watch?v={m.group(1)}"
+    # shorts -> watch
+    m = re.match(r'^https?://(www\.)?youtube\.com/shorts/([A-Za-z0-9_-]{8,})', url)
+    if m:
+        return f"https://www.youtube.com/watch?v={m.group(2)}"
+    return url
+
+
 
 def start_validation_thread(
     youtube_link,
@@ -277,40 +292,47 @@ def get_unique_folder_name(parent_dir, base_name):
 
 
 def download_video(youtube_link, download_folder):
-    """
-    Robust downloader:
-      1) Probe formats (no download).
-      2) Choose best available (prefer mp4; else any).
-      3) Download using that exact format id (or id pair) and merge to mp4.
-    Returns: absolute filepath, or None on failure.
-    """
+    youtube_link = _normalize_youtube_url(youtube_link)
     os.makedirs(download_folder, exist_ok=True)
 
-    FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"  # <- your path
+    FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
 
-    base_opts = {
+    ydl_opts = {
         "outtmpl": os.path.join(download_folder, "%(title).50s.%(ext)s"),
+        # Try best video+audio; if separate, yt-dlp will merge with ffmpeg
+        "format": "bestvideo*+bestaudio/best",
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "ffmpeg_location": FFMPEG_DIR,  # make yt-dlp find ffmpeg even if PATH is odd
+        "ffmpeg_location": FFMPEG_DIR,
+        # Helps with some recent YouTube player variants
+        "extractor_args": {"youtube": {"player_client": ["web"]}},
+        # Be tolerant
+        "concurrent_fragment_downloads": 3,
+        "retries": 5,
     }
 
-    # 1) Probe formats first
     try:
-        import yt_dlp
-        with yt_dlp.YoutubeDL(base_opts) as ydl:
-            info = ydl.extract_info(youtube_link, download=False)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(youtube_link, download=True)
+            out = info.get("_filename")
+            if out and os.path.exists(out):
+                print("[download_video] downloaded:", out)
+                return out
+            # fallback: guess common extensions by title
+            title = (info.get("title") or "video")[:50]
+            for ext in ("mp4", "mkv", "webm", "m4a"):
+                cand = os.path.join(download_folder, f"{title}.{ext}")
+                if os.path.exists(cand):
+                    print("[download_video] downloaded (guessed):", cand)
+                    return cand
     except Exception as e:
-        print("[download_video] PROBE failed:", e)
-        return None
+        print("[download_video] DOWNLOAD failed:", e)
 
-    # Some links really have no video streams (e.g., image-only or blocked)
-    formats = info.get("formats") or []
-    if not formats:
-        print("[download_video] No formats found for:", youtube_link)
-        return None
+    print("[download_video] failed to download for:", youtube_link)
+    return None
+
 
     # Helper: pick best video format, then best audio. Prefer mp4, but accept any.
     def best_video(formats):
