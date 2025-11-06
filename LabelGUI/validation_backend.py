@@ -278,38 +278,109 @@ def get_unique_folder_name(parent_dir, base_name):
 
 def download_video(youtube_link, download_folder):
     """
-    Robust downloader using yt_dlp:
-      - Try preferred mp4 format first.
-      - If not available, fall back to best available format and let yt-dlp
-        postprocess (ffmpeg) to merge into .mp4.
-    Requires: ffmpeg on PATH for merging audio+video.
-    Returns the full path to the downloaded file, or None on failure.
+    Robust downloader:
+      1) Probe formats (no download).
+      2) Choose best available (prefer mp4; else any).
+      3) Download using that exact format id (or id pair) and merge to mp4.
+    Returns: absolute filepath, or None on failure.
     """
     os.makedirs(download_folder, exist_ok=True)
 
-    # Primary preferred options (mp4 if possible)
-    ydl_opts_primary = {
-        'outtmpl': os.path.join(download_folder, '%(title).50s.%(ext)s'),
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'merge_output_format': 'mp4',
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'postprocessors': [{
-            'key': 'FFmpegEmbedSubtitle',  # harmless if no subtitles
-        }],
+    FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"  # <- your path
+
+    base_opts = {
+        "outtmpl": os.path.join(download_folder, "%(title).50s.%(ext)s"),
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "ffmpeg_location": FFMPEG_DIR,  # make yt-dlp find ffmpeg even if PATH is odd
     }
 
-    # Fallback options (be more permissive)
-    ydl_opts_fallback = {
-        'outtmpl': os.path.join(download_folder, '%(title).50s.%(ext)s'),
-        'format': 'bestvideo+bestaudio/best',
-        'merge_output_format': 'mp4',
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        # yt-dlp will automatically use ffmpeg to merge when needed
-    }
+    # 1) Probe formats first
+    try:
+        import yt_dlp
+        with yt_dlp.YoutubeDL(base_opts) as ydl:
+            info = ydl.extract_info(youtube_link, download=False)
+    except Exception as e:
+        print("[download_video] PROBE failed:", e)
+        return None
+
+    # Some links really have no video streams (e.g., image-only or blocked)
+    formats = info.get("formats") or []
+    if not formats:
+        print("[download_video] No formats found for:", youtube_link)
+        return None
+
+    # Helper: pick best video format, then best audio. Prefer mp4, but accept any.
+    def best_video(formats):
+        vids = [f for f in formats if f.get("vcodec") not in (None, "none")]
+        # prefer mp4 container
+        mp4s = [f for f in vids if str(f.get("ext", "")).lower() == "mp4"]
+        pool = mp4s if mp4s else vids
+        # sort by approximate quality/bitrate
+        pool.sort(key=lambda f: (f.get("height") or 0, f.get("tbr") or 0), reverse=True)
+        return pool[0] if pool else None
+
+    def best_audio(formats):
+        auds = [f for f in formats if f.get("acodec") not in (None, "none")]
+        # prefer m4a for mp4 compatibility
+        m4as = [f for f in auds if str(f.get("ext", "")).lower() in ("m4a", "mp4")]
+        pool = m4as if m4as else auds
+        pool.sort(key=lambda f: (f.get("abr") or 0, f.get("tbr") or 0), reverse=True)
+        return pool[0] if pool else None
+
+    # Single-file (already muxed) candidates (prefer mp4)
+    muxed = [f for f in formats if f.get("vcodec") not in (None, "none") and f.get("acodec") not in (None, "none")]
+    muxed_mp4 = [f for f in muxed if str(f.get("ext", "")).lower() == "mp4"]
+    chosen_single = None
+    if muxed_mp4:
+        muxed_mp4.sort(key=lambda f: (f.get("height") or 0, f.get("tbr") or 0), reverse=True)
+        chosen_single = muxed_mp4[0]
+    elif muxed:
+        muxed.sort(key=lambda f: (f.get("height") or 0, f.get("tbr") or 0), reverse=True)
+        chosen_single = muxed[0]
+
+    v = best_video(formats)
+    a = best_audio(formats)
+
+    # Build format selector
+    if chosen_single:
+        fmt_selector = chosen_single.get("format_id")
+    elif v and a:
+        fmt_selector = f"{v.get('format_id')}+{a.get('format_id')}"
+    elif v:
+        fmt_selector = v.get("format_id")
+    else:
+        print("[download_video] No usable video stream (video formats missing).")
+        return None
+
+    # 2) Download with the chosen format selector
+    dl_opts = dict(base_opts)
+    dl_opts["format"] = fmt_selector
+
+    try:
+        with yt_dlp.YoutubeDL(dl_opts) as ydl:
+            finfo = ydl.extract_info(youtube_link, download=True)
+            # determine the actual output path
+            out = finfo.get("_filename")
+            if out and os.path.exists(out):
+                print("[download_video] downloaded:", out)
+                return out
+            # guess by title
+            title = finfo.get("title", "video")[:50]
+            # check common extensions
+            for ext in ("mp4", "mkv", "webm", "m4a"):
+                cand = os.path.join(download_folder, f"{title}.{ext}")
+                if os.path.exists(cand):
+                    print("[download_video] downloaded (guessed):", cand)
+                    return cand
+    except Exception as e:
+        print("[download_video] DOWNLOAD failed:", e)
+
+    print("[download_video] failed to download for:", youtube_link)
+    return None
+
 
     def try_download(opts):
         try:
