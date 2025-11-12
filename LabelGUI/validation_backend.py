@@ -14,6 +14,8 @@ _log_file_path = None
 _delete_original = False
 _event_times = []     # (idx, event_type, time_sec)
 _video_duration = 0.0
+_current_video_file = None 
+
 
 _extraction_in_progress = False
 _extraction_current = 0
@@ -85,6 +87,9 @@ def start_validation_thread(
     _log_file_path = os.path.join(target_folder, "event_log.txt")
 
     downloaded_filepath = download_video(youtube_link, youtube_downloads_dir)
+    global _current_video_file
+    _current_video_file = downloaded_filepath
+
     if not downloaded_filepath:
         _video_done = True
         with open(_log_file_path, 'w') as f:
@@ -134,43 +139,68 @@ def start_validation_thread(
 
 
 def generate_video_stream():
-    global _video_done, _video_duration
+    global _video_done, _video_duration, _current_video_file
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
 
-    files = sorted(
-        [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
-        key=os.path.getmtime
-    )
-    video_file = None
-    for f in reversed(files):
-        if f.lower().endswith('.mp4'):
-            video_file = f
-            break
+    # Prefer the file that this session actually downloaded
+    if _current_video_file and os.path.exists(_current_video_file):
+        candidate = _current_video_file
+    else:
+        # Fallback to newest .mp4 (legacy behavior)
+        try:
+            files = sorted(
+                [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
+                key=os.path.getmtime
+            )
+        except Exception as e:
+            print("[STREAM] Cannot list YouTubeDownloads:", e)
+            files = []
+        candidate = None
+        for f in reversed(files):
+            if f.lower().endswith('.mp4'):
+                candidate = f
+                break
 
-    if not video_file:
+    if not candidate:
+        print("[STREAM] No mp4 found yet — waiting...")
         while not _video_done:
+            time.sleep(0.2)
             yield b''
-            time.sleep(0.1)
         return
 
-    cap = cv2.VideoCapture(video_file)
+    cap = cv2.VideoCapture(candidate)
     if not cap.isOpened():
+        print(f"[STREAM] OpenCV failed to open: {candidate}")
         while not _video_done:
+            time.sleep(0.2)
             yield b''
-            time.sleep(0.1)
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    if total_frames > 0:
-        _video_duration = total_frames / fps
-    else:
-        _video_duration = 0.0
+    _video_duration = (total_frames / fps) if total_frames else 0.0
 
     video_utils.set_video_duration(_video_duration)
     video_utils.set_current_time_sec(0.0)
+
+    def draw_validation_overlay(frame, current_time_sec):
+        elapsed_str = str(timedelta(seconds=int(current_time_sec)))
+        total_str = str(timedelta(seconds=int(_video_duration)))
+        cv2.putText(frame, f"{elapsed_str} / {total_str}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        return frame
+
+    print(f"[STREAM] Playing: {candidate} @ fps={fps}")
+    for mjpeg_frame in video_utils.read_video_frames(cap, fps, draw_validation_overlay):
+        if not mjpeg_frame:
+            time.sleep(0.1)
+            continue
+        yield mjpeg_frame
+
+    _video_done = True
+
 
     def draw_validation_overlay(frame, current_time_sec):
         elapsed_str = str(timedelta(seconds=int(current_time_sec)))
@@ -293,75 +323,99 @@ def get_unique_folder_name(parent_dir, base_name):
 
 def download_video(youtube_link, download_folder):
     """
-    Robust YouTube download that copes with SABR/missing-URL issues:
-      1) Try bv*+ba (any container) -> MP4 merge
-      2) Try best[ext=mp4]
-      3) Try explicit 18 (360p mp4 muxed, very compatible)
-      4) Try best
-    Returns absolute file path or None.
+    Download to a UNIQUE filename (title + id), then return the real filepath.
+    Strategy order:
+      1) bv*+ba  (merged to mp4)
+      2) best[ext=mp4]
+      3) 18      (360p mp4 muxed)
+      4) best
     """
     os.makedirs(download_folder, exist_ok=True)
 
-    # Normalize shorts / youtu.be links (keep your helper if you added it)
-    try:
-        norm = _normalize_youtube_url  # if you added it above
-    except NameError:
-        def norm(u): return (u or "").strip()
-    youtube_link = norm(youtube_link)
+    # Normalize shorts / youtu.be links
+    youtube_link = _normalize_youtube_url(youtube_link)
 
     FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
 
-    # Common opts
-    base = {
-        "outtmpl": os.path.join(download_folder, "%(title).50s.%(ext)s"),
+    import yt_dlp
+
+    base_opts = {
+        # include %(id)s to make each video unique regardless of title
+        "outtmpl": os.path.join(download_folder, "%(title).50s-%(id)s.%(ext)s"),
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "ffmpeg_location": FFMPEG_DIR,
-        # Use android client to dodge SABR missing-url issue
+        # Avoid SABR missing-url issues
         "extractor_args": {"youtube": {"player_client": ["android"]}},
         "retries": 5,
         "concurrent_fragment_downloads": 4,
     }
 
-    # Ordered strategies (most robust first)
     strategies = [
-        'bv*+ba/bestvideo*+bestaudio',  # any container, merged to mp4
-        'best[ext=mp4]',                # already-muxed mp4 if available
-        '18',                           # explicit 360p mp4 muxed (reliable)
-        'best'                          # last resort
+        'bv*+ba/bestvideo*+bestaudio',
+        'best[ext=mp4]',
+        '18',
+        'best',
     ]
 
-    import yt_dlp
+    def _resolve_output_paths(ydl, info):
+        """Return actual files yt-dlp says it wrote (no guessing)."""
+        paths = []
+
+        for k in ("requested_downloads", "requested_formats", "files"):
+            lst = info.get(k) or []
+            for item in lst:
+                fp = item.get("filepath") or item.get("_filename")
+                if fp and os.path.exists(fp):
+                    paths.append(fp)
+
+        fn = info.get("_filename")
+        if fn and os.path.exists(fn):
+            paths.append(fn)
+
+        try:
+            prepared = ydl.prepare_filename(info)
+            if prepared and os.path.exists(prepared):
+                paths.append(prepared)
+            # if remuxed to mp4
+            base, _ = os.path.splitext(prepared)
+            mp4 = base + ".mp4"
+            if os.path.exists(mp4):
+                paths.append(mp4)
+        except Exception:
+            pass
+
+        # Dedup
+        seen = set(); uniq = []
+        for p in paths:
+            if p not in seen:
+                uniq.append(p); seen.add(p)
+        return uniq
 
     def try_with(fmt):
-        opts = dict(base)
-        opts["format"] = fmt
+        opts = dict(base_opts); opts["format"] = fmt
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(youtube_link, download=True)
-                out = info.get("_filename")
-                if out and os.path.exists(out):
-                    print(f"[download_video] succeeded with format '{fmt}':", out)
-                    return out
-                title = (info.get("title") or "video")[:50]
-                for ext in ("mp4", "mkv", "webm", "m4a"):
-                    cand = os.path.join(download_folder, f"{title}.{ext}")
-                    if os.path.exists(cand):
-                        print(f"[download_video] succeeded (guessed) with format '{fmt}':", cand)
-                        return cand
+                out_paths = _resolve_output_paths(ydl, info)
+                for p in out_paths:
+                    if p.lower().endswith((".mp4", ".mkv", ".webm")) and os.path.exists(p):
+                        print(f"[download_video] succeeded with '{fmt}': {p}")
+                        return p
         except Exception as e:
-            print(f"[download_video] attempt with format '{fmt}' failed:", e)
+            print(f"[download_video] attempt with '{fmt}' failed:", e)
         return None
 
     for fmt in strategies:
-        path = try_with(fmt)
-        if path:
-            return path
+        p = try_with(fmt)
+        if p:
+            return p
 
     print("[download_video] failed to download for:", youtube_link)
     return None
+
 
 
     # Helper: pick best video format, then best audio. Prefer mp4, but accept any.
