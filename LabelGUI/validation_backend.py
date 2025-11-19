@@ -7,6 +7,8 @@ from datetime import timedelta
 import video_utils
 import json
 from datetime import datetime
+import pandas as pd   # <- add this
+
 
 _processing_thread = None
 _video_done = False
@@ -223,11 +225,99 @@ def generate_video_stream():
 def multiple_pass_extract(video_path, target_folder, event_times_list, fps_unused):
     """
     Frame-based clips: 15 frames before + 15 after (~1s at 30fps).
+    Also builds an Excel file with one row per labeled event.
     """
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
     if not event_times_list:
         return
+
+    sorted_times = sorted(event_times_list, key=lambda x: x[2])
+
+    _extraction_in_progress = True
+    _extraction_current = 0
+    _extraction_total = len(sorted_times)
+
+    # We will accumulate rows for Excel here
+    excel_rows = []
+
+    with open(_log_file_path, 'a') as lf:
+        for (idx, event_type, ctime) in sorted_times:
+            _extraction_current += 1
+
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                continue
+
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            event_frame = int(ctime * fps)
+            frame_window = 15  # 15 before + 15 after
+
+            start_frame = max(0, event_frame - frame_window)
+            end_frame = event_frame + frame_window
+
+            # Log line in the text file (for human reading)
+            lf.write(
+                f"{event_type.capitalize()} #{idx}: [Frames {start_frame}-{end_frame}] "
+                f"(~{sec_to_hms(start_frame/fps)} - ~{sec_to_hms(end_frame/fps)})\n"
+            )
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            out_filename = os.path.join(target_folder, f"{event_type}_{idx:02d}.mp4")
+            writer = None
+
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                current_frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                if current_frame_idx > end_frame:
+                    break
+
+                if writer is None:
+                    h, w, _ = frame.shape
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    writer = cv2.VideoWriter(out_filename, fourcc, fps, (w, h))
+
+                overlay_text = f"{event_type.capitalize()} #{idx}, Frame={current_frame_idx}"
+                frame_copy = frame.copy()
+                cv2.putText(frame_copy, overlay_text, (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+                writer.write(frame_copy)
+
+            if writer:
+                writer.release()
+            cap.release()
+
+            # Add one row for this event to the Excel data
+            excel_rows.append({
+                "Event index": idx,
+                "Event type": event_type,
+                "Event time (sec)": round(ctime, 3),
+                "Event time (hh:mm:ss)": sec_to_hms(ctime),
+                "Start frame": start_frame,
+                "End frame": end_frame,
+                "Approx start time": sec_to_hms(start_frame / fps),
+                "Approx end time": sec_to_hms(end_frame / fps),
+                "Clip filename": os.path.basename(out_filename),
+            })
+
+    _extraction_in_progress = False
+
+    # After processing all events, write the Excel file
+    if excel_rows:
+        base_title = os.path.splitext(os.path.basename(video_path))[0]
+        excel_name = f"{base_title}_labels.xlsx"
+        excel_path = os.path.join(target_folder, excel_name)
+
+        try:
+            df = pd.DataFrame(excel_rows)
+            df.to_excel(excel_path, index=False)
+            print(f"[multiple_pass_extract] Wrote Excel labels to: {excel_path}")
+        except Exception as e:
+            print("[multiple_pass_extract] Failed to write Excel file:", e)
+
 
     sorted_times = sorted(event_times_list, key=lambda x: x[2])
 
