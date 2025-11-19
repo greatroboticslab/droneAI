@@ -7,22 +7,14 @@
     .status-dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
     .ok { background:#10b981; }      /* green */
     .no { background:#ef4444; }      /* red */
-    .muted { color:#9ca3af; font-size: 0.9em; }
-
+    .muted { color:#9ca3af; font-size: 0.9em; margin-top:6px; }
     table { border-collapse: collapse; width: 100%; margin-bottom: 16px; }
-    th, td { border: 1px solid #1f2937; padding: 8px 10px; text-align:left; }
+    th, td { border: 1px solid #1f2933; padding: 8px; text-align:left; }
     th {
-      background:#0b1120;
-      color:#e5e7eb;
+      background:#111827;
+      color:#f9fafb;
       font-weight:600;
-      position:sticky;
-      top:0;
-      z-index:1;
     }
-    tr:nth-child(even) { background:#020617; }
-    tr:nth-child(odd) { background:#020617; }
-    tr:hover { background:#111827; }
-
     .nowrap { white-space: nowrap; }
     .truncate { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
@@ -32,13 +24,12 @@
   <h1>Select a Video to Label</h1>
 
   {% if entries and entries|length > 0 %}
-    <!-- Status overview table (green/red + event counts) -->
+    <!-- Status overview table -->
     <table>
       <tr>
         <th>Status</th>
         <th>Person</th>
         <th class="nowrap">Prefix</th>
-        <th class="nowrap">Total events</th>
         <th>Link</th>
       </tr>
       {% for e in entries %}
@@ -54,7 +45,6 @@
           </td>
           <td>{{ e.person }}</td>
           <td class="nowrap">{{ e.prefix }}</td>
-          <td class="nowrap">{{ e.total_events }}</td>
           <td class="truncate" title="{{ e.link }}">{{ e.link }}</td>
         </tr>
       {% endfor %}
@@ -67,11 +57,7 @@
         {% for e in entries %}
           <option value="{{ e.id }}">
             {{ e.person }} — {{ e.link }}
-            {% if e.labeled %}
-              [✔ {{ e.total_events }} events]
-            {% else %}
-              [✖ not labeled]
-            {% endif %}
+            {% if e.labeled %} [✔ labeled]{% else %} [✖ not labeled]{% endif %}
           </option>
         {% endfor %}
       </select>
@@ -90,7 +76,7 @@
       <br><br>
       <button type="submit">Start Labeling</button>
       <p class="muted">
-        Green rows already have at least one labeled session for that specific video.
+        Green rows indicate that this person already has at least one labeled session.
       </p>
     </form>
   {% else %}
