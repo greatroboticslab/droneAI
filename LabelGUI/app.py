@@ -55,14 +55,17 @@ def validation_index():
             folder_name=folder_name,
             delete_original=delete_original
         )
-        return redirect(url_for('validation_view_stream'))
+        return redirect(url_for('validation_view_stream', source='manual'))
 
     return render_template('validation_index.html')
 
 
+
 @app.route('/validation_view_stream')
 def validation_view_stream():
-    return render_template('validation_results.html')
+    source = request.args.get('source', 'manual')
+    return render_template('validation_results.html', source=source)
+
 
 
 @app.route('/validation_video_feed')
@@ -202,19 +205,25 @@ def pick_from_excel():
 
 @app.route('/start_from_excel', methods=['POST'])
 def start_from_excel():
-    """
-    Use selection to start validation with nested privacy-safe folder structure:
-      ValidationResults/<first4_of_name>/<Scenario N>/
-    """
     from validation_backend import start_validation_thread
     global EXCEL_ENTRIES
     entry_id = int(request.form.get('entry_id', '0'))
-    scenario_base = request.form.get('scenario_base', 'Simulation')  # "Simulation" | "Real flight"
+    scenario_base = request.form.get('scenario_base', 'Simulation')
     delete_original = True if request.form.get('delete_original') == 'on' else False
 
     match = next((e for e in EXCEL_ENTRIES if e["id"] == entry_id), None)
     if not match:
         return "Invalid selection.", 400
+
+    start_validation_thread(
+        youtube_link=match["link"],
+        folder_name=None,
+        delete_original=delete_original,
+        person_name=match["person"],
+        scenario_base=scenario_base
+    )
+    return redirect(url_for('validation_view_stream', source='excel'))
+
 
     start_validation_thread(
         youtube_link=match["link"],
