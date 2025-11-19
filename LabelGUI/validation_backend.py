@@ -631,3 +631,8 @@ def get_progress_summary():
         }
     return out
 
+def get_full_progress():
+    """Return the full progress.json structure for detailed per-video stats."""
+    return _load_progress()
+
+
