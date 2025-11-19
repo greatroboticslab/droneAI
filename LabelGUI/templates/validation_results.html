@@ -1,112 +1,174 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Validation - Mark Events</title>
+    <title>Video Stream — Mark Events</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
-      body { font-family: Arial, sans-serif; }
-      .container { max-width: 900px; margin: 20px auto; padding: 10px; }
-      #videoBox {
-        width: 820px;
-        padding: 10px;
-        border: 2px dashed #999;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 150px;
-        background: #fafafa;
-      }
-      #videoImg { display: block; max-width: 100%; height: auto; }
-      #fallback { color:#a00; display:none; text-align:center; padding: 8px; }
-      #downloading { color:#444; margin-bottom:8px; }
-      .controls { margin: 8px 0; }
-      .controls button { margin-right: 8px; padding: 8px 12px; }
-      h2 { margin-top: 18px; }
-      .event-buttons button { margin-right: 8px; padding: 10px 14px; }
+        .video-frame {
+            width: 100%;
+            max-height: 420px;
+            object-fit: contain;
+            background: #111827;
+            border: 2px dashed #4b5563;
+        }
+        .controls-row {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .controls-row button {
+            min-width: 130px;
+        }
+        .section-title {
+            margin-top: 24px;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        #finishedArea {
+            margin-top: 30px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            background: #0f172a;
+            border: 1px solid #10b981;
+        }
+        #finishedArea h2 {
+            color: #bbf7d0;
+        }
+        #statusMessage {
+            margin-top: 8px;
+            font-size: 0.9rem;
+            color: #9ca3af;
+        }
     </style>
 </head>
 <body>
 <div class="container">
     <h1>Video Stream — Mark Events</h1>
 
-    <div id="videoBox">
-      <!-- MJPEG stream element -->
-      <img id="videoImg" src="{{ url_for('validation_video_feed') }}" alt="Video stream (MJPEG)">
-      <div id="fallback">No video stream available. The file may still be downloading or the stream failed. Check the server console for errors.</div>
+    <!-- LIVE LABELING AREA -->
+    <div id="liveArea">
+        <img id="videoStream"
+             class="video-frame"
+             src="{{ url_for('validation_video_feed') }}"
+             alt="Video stream will appear here">
+
+        <div id="statusMessage">
+            If the video area is blank, the video may still be downloading from YouTube. Please wait a few seconds.
+        </div>
+
+        <div class="controls-row">
+            <button type="button" onclick="rewind10()">« Rewind 10s</button>
+            <button type="button" onclick="togglePause()">Pause / Resume</button>
+            <button type="button" onclick="forward10()">Forward 10s »</button>
+        </div>
+
+        <h2 class="section-title">Mark Events</h2>
+        <div class="controls-row">
+            <button type="button" onclick="sendEvent('takeoff')">Mark Take-off</button>
+            <button type="button" onclick="sendEvent('land')">Mark Land</button>
+            <button type="button" onclick="sendEvent('minorcrash')">Mark Minor Crash</button>
+            <button type="button" onclick="sendEvent('severecrash')">Mark Severe Crash</button>
+        </div>
+
+        <p style="margin-top: 16px;">
+            <strong>Total Events Observed:</strong>
+            <span id="eventCount">0</span>
+        </p>
+
+        <br>
+        <a href="/"><button type="button">Back to Home</button></a>
     </div>
 
-    <div id="downloading">If the video area is blank, the video may still be downloading from YouTube. Please wait a few seconds.</div>
+    <!-- FINISHED SUMMARY AREA (hidden until video is done) -->
+    <div id="finishedArea" style="display:none;">
+        <h2>Labeling Session Completed</h2>
+        <p>
+            Your labeled events and short video clips have been saved in the
+            <code>ValidationResults</code> folder of this project, organized by participant and scenario.
+        </p>
+        <p>
+            <strong>Total events this session:</strong>
+            <span id="finalEventCount">0</span>
+        </p>
 
-    <!-- Playback controls -->
-    <div class="controls">
-      <button onclick="rewind()">&laquo; Rewind 10s</button>
-      <button onclick="togglePause()">Pause / Resume</button>
-      <button onclick="forward()">Forward 10s &raquo;</button>
+        <div class="controls-row" style="margin-top: 16px;">
+            <a href="/pick_from_excel">
+                <button type="button">Label More Videos</button>
+            </a>
+            <a href="/">
+                <button type="button">Back to Home</button>
+            </a>
+        </div>
     </div>
-
-    <!-- Event buttons -->
-    <h2>Mark Events</h2>
-    <div class="event-buttons">
-      <button onclick="markEvent('takeoff')">Mark Take-off</button>
-      <button onclick="markEvent('land')">Mark Land</button>
-      <button onclick="markEvent('minor-crash')">Mark Minor Crash</button>
-      <button onclick="markEvent('severe-crash')">Mark Severe Crash</button>
-    </div>
-
-    <p style="margin-top:12px;">Total Events Observed: <span id="eventCount">0</span></p>
-
-    <br>
-    <a href="/"><button type="button">Back to Home</button></a>
 </div>
 
 <script>
-/* Mark event via JSON POST */
-function markEvent(eventType) {
-    fetch('/mark_event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: eventType })
-    }).then(() => updateCount())
-      .catch(e => console.error("mark_event failed:", e));
-}
+    let finished = false;
 
-/* Update event count display */
-function updateCount() {
-    fetch('/get_crash_count')
-        .then(r => r.text())
-        .then(txt => { document.getElementById("eventCount").innerText = txt; })
-        .catch(e => console.error("get_crash_count failed:", e));
-}
-
-/* Playback control helpers */
-function rewind() { fetch('/rewind', { method: 'POST' }).catch(e=>console.error(e)); }
-function forward() { fetch('/fast_forward', { method: 'POST' }).catch(e=>console.error(e)); }
-function togglePause() { fetch('/toggle_pause', { method: 'POST' }).then(r => r.json()).then(d => console.log("pause toggled:", d)).catch(e=>console.error(e)); }
-
-/* Show fallback message if image fails to load */
-const videoImg = document.getElementById('videoImg');
-const fallback = document.getElementById('fallback');
-const downloadingNote = document.getElementById('downloading');
-
-videoImg.addEventListener('error', () => {
-  fallback.style.display = 'block';
-});
-
-/* Hide the "downloading" suggestion when frames appear */
-let checkLoaded = setInterval(() => {
-  try {
-    if (videoImg && videoImg.naturalWidth > 0) {
-      downloadingNote.style.display = 'none';
-      fallback.style.display = 'none';
-      clearInterval(checkLoaded);
+    function sendEvent(eventType) {
+        fetch('/mark_event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event: eventType })
+        }).then(() => {
+            refreshEventCount();
+        }).catch(err => console.error('mark_event error:', err));
     }
-  } catch (e) {}
-}, 800);
 
-/* Periodically refresh the event count */
-updateCount();
-setInterval(updateCount, 2000);
+    function rewind10() {
+        fetch('/rewind', { method: 'POST' });
+    }
+
+    function forward10() {
+        fetch('/fast_forward', { method: 'POST' });
+    }
+
+    function togglePause() {
+        fetch('/toggle_pause', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                console.log('paused:', data.paused);
+            });
+    }
+
+    function refreshEventCount() {
+        fetch('/get_crash_count')
+            .then(r => r.text())
+            .then(txt => {
+                document.getElementById('eventCount').innerText = txt;
+                if (finished) {
+                    document.getElementById('finalEventCount').innerText = txt;
+                }
+            })
+            .catch(err => console.error('get_crash_count error:', err));
+    }
+
+    function pollStatus() {
+        if (finished) return;
+        fetch('/check_status')
+            .then(r => r.text())
+            .then(status => {
+                if (status === 'done') {
+                    finished = true;
+                    // One last refresh of event count
+                    refreshEventCount();
+                    // Swap live area for finished summary
+                    document.getElementById('liveArea').style.display = 'none';
+                    document.getElementById('finishedArea').style.display = 'block';
+                }
+            })
+            .catch(err => console.error('check_status error:', err))
+            .finally(() => {
+                if (!finished) {
+                    setTimeout(pollStatus, 2000);
+                }
+            });
+    }
+
+    // Start polling when page loads
+    refreshEventCount();
+    setTimeout(pollStatus, 2000);
 </script>
 </body>
 </html>
