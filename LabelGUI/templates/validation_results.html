@@ -1,174 +1,168 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Video Stream — Mark Events</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        .video-frame {
-            width: 100%;
-            max-height: 420px;
-            object-fit: contain;
-            background: #111827;
-            border: 2px dashed #4b5563;
-        }
-        .controls-row {
-            margin-top: 10px;
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        .controls-row button {
-            min-width: 130px;
-        }
-        .section-title {
-            margin-top: 24px;
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-        #finishedArea {
-            margin-top: 30px;
-            padding: 16px 20px;
-            border-radius: 8px;
-            background: #0f172a;
-            border: 1px solid #10b981;
-        }
-        #finishedArea h2 {
-            color: #bbf7d0;
-        }
-        #statusMessage {
-            margin-top: 8px;
-            font-size: 0.9rem;
-            color: #9ca3af;
-        }
-    </style>
+  <title>Video Stream — Mark Events</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    #done-overlay {
+      display: none;
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 8px;
+      background: #0f172a;
+      border: 1px solid #22c55e;
+      color: #e5e7eb;
+    }
+    #done-overlay h2 {
+      margin-top: 0;
+      color: #22c55e;
+    }
+    #done-buttons {
+      margin-top: 12px;
+    }
+    #done-buttons button {
+      margin-right: 10px;
+    }
+  </style>
 </head>
 <body>
 <div class="container">
-    <h1>Video Stream — Mark Events</h1>
+  <h1>Video Stream — Mark Events</h1>
 
-    <!-- LIVE LABELING AREA -->
-    <div id="liveArea">
-        <img id="videoStream"
-             class="video-frame"
-             src="{{ url_for('validation_video_feed') }}"
-             alt="Video stream will appear here">
+  <!-- Video area -->
+  <div>
+    <img id="video-feed"
+         src="{{ url_for('validation_video_feed') }}"
+         alt="Video stream will appear here"
+         style="width:100%; max-height:480px; object-fit:contain; border:1px solid #ccc;">
+  </div>
 
-        <div id="statusMessage">
-            If the video area is blank, the video may still be downloading from YouTube. Please wait a few seconds.
-        </div>
+  <p style="margin-top:6px; font-size:0.9em; color:#9ca3af;">
+    If the video area is blank, the video may still be downloading from YouTube. Please wait a few seconds.
+  </p>
 
-        <div class="controls-row">
-            <button type="button" onclick="rewind10()">« Rewind 10s</button>
-            <button type="button" onclick="togglePause()">Pause / Resume</button>
-            <button type="button" onclick="forward10()">Forward 10s »</button>
-        </div>
+  <!-- Playback controls -->
+  <div style="margin-top: 10px;">
+    <button id="rewind-btn">« Rewind 10s</button>
+    <button id="pause-btn">Pause / Resume</button>
+    <button id="forward-btn">Forward 10s »</button>
+  </div>
 
-        <h2 class="section-title">Mark Events</h2>
-        <div class="controls-row">
-            <button type="button" onclick="sendEvent('takeoff')">Mark Take-off</button>
-            <button type="button" onclick="sendEvent('land')">Mark Land</button>
-            <button type="button" onclick="sendEvent('minorcrash')">Mark Minor Crash</button>
-            <button type="button" onclick="sendEvent('severecrash')">Mark Severe Crash</button>
-        </div>
+  <hr>
 
-        <p style="margin-top: 16px;">
-            <strong>Total Events Observed:</strong>
-            <span id="eventCount">0</span>
-        </p>
+  <!-- Event buttons -->
+  <h2>Mark Events</h2>
+  <div style="margin-bottom: 12px;">
+    <button class="event-btn" data-event="takeoff">Mark Take-off</button>
+    <button class="event-btn" data-event="land">Mark Land</button>
+    <button class="event-btn" data-event="minor-crash">Mark Minor Crash</button>
+    <button class="event-btn" data-event="severe-crash">Mark Severe Crash</button>
+  </div>
 
-        <br>
-        <a href="/"><button type="button">Back to Home</button></a>
+  <p>Total Events Observed: <span id="event-count">0</span></p>
+
+  <!-- End-of-session overlay -->
+  <div id="done-overlay">
+    <h2>Labeling Session Complete</h2>
+    <p id="done-message">
+      The video has finished and your labeled clips + log file are being saved
+      into the ValidationResults folder.
+    </p>
+    <div id="done-buttons">
+      {% if source == 'excel' %}
+        <button type="button" onclick="window.location.href='{{ url_for('pick_from_excel') }}'">
+          Label Another Video
+        </button>
+      {% endif %}
+      <button type="button" onclick="window.location.href='{{ url_for('home_page') }}'">
+        Back to Home
+      </button>
     </div>
+  </div>
 
-    <!-- FINISHED SUMMARY AREA (hidden until video is done) -->
-    <div id="finishedArea" style="display:none;">
-        <h2>Labeling Session Completed</h2>
-        <p>
-            Your labeled events and short video clips have been saved in the
-            <code>ValidationResults</code> folder of this project, organized by participant and scenario.
-        </p>
-        <p>
-            <strong>Total events this session:</strong>
-            <span id="finalEventCount">0</span>
-        </p>
+  <br>
+  <button type="button" onclick="window.location.href='{{ url_for('home_page') }}'">
+    Back to Home
+  </button>
 
-        <div class="controls-row" style="margin-top: 16px;">
-            <a href="/pick_from_excel">
-                <button type="button">Label More Videos</button>
-            </a>
-            <a href="/">
-                <button type="button">Back to Home</button>
-            </a>
-        </div>
-    </div>
+  <div class="page-footer">
+    Created by Ethan Stanks 2025.
+    <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
+  </div>
 </div>
 
 <script>
-    let finished = false;
+  const eventButtons = document.querySelectorAll('.event-btn');
+  const eventCountSpan = document.getElementById('event-count');
+  const pauseBtn = document.getElementById('pause-btn');
+  const rewindBtn = document.getElementById('rewind-btn');
+  const forwardBtn = document.getElementById('forward-btn');
+  const doneOverlay = document.getElementById('done-overlay');
+  const doneMessage = document.getElementById('done-message');
+  const sessionSource = "{{ source|default('manual') }}";
 
-    function sendEvent(eventType) {
-        fetch('/mark_event', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ event: eventType })
-        }).then(() => {
-            refreshEventCount();
-        }).catch(err => console.error('mark_event error:', err));
-    }
+  let eventCount = 0;
 
-    function rewind10() {
-        fetch('/rewind', { method: 'POST' });
-    }
+  // Send event label
+  eventButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ev = btn.getAttribute('data-event');
+      fetch('/mark_event', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({event: ev})
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          eventCount += 1;
+          eventCountSpan.textContent = eventCount;
+        }
+      })
+      .catch(err => console.error('mark_event error:', err));
+    });
+  });
 
-    function forward10() {
-        fetch('/fast_forward', { method: 'POST' });
-    }
+  // Playback buttons
+  pauseBtn.addEventListener('click', () => {
+    fetch('/toggle_pause', {method: 'POST'});
+  });
 
-    function togglePause() {
-        fetch('/toggle_pause', { method: 'POST' })
-            .then(r => r.json())
-            .then(data => {
-                console.log('paused:', data.paused);
-            });
-    }
+  rewindBtn.addEventListener('click', () => {
+    fetch('/rewind', {method: 'POST'});
+  });
 
-    function refreshEventCount() {
-        fetch('/get_crash_count')
-            .then(r => r.text())
-            .then(txt => {
-                document.getElementById('eventCount').innerText = txt;
-                if (finished) {
-                    document.getElementById('finalEventCount').innerText = txt;
-                }
-            })
-            .catch(err => console.error('get_crash_count error:', err));
-    }
+  forwardBtn.addEventListener('click', () => {
+    fetch('/fast_forward', {method: 'POST'});
+  });
 
-    function pollStatus() {
-        if (finished) return;
-        fetch('/check_status')
-            .then(r => r.text())
-            .then(status => {
-                if (status === 'done') {
-                    finished = true;
-                    // One last refresh of event count
-                    refreshEventCount();
-                    // Swap live area for finished summary
-                    document.getElementById('liveArea').style.display = 'none';
-                    document.getElementById('finishedArea').style.display = 'block';
-                }
-            })
-            .catch(err => console.error('check_status error:', err))
-            .finally(() => {
-                if (!finished) {
-                    setTimeout(pollStatus, 2000);
-                }
-            });
-    }
-
-    // Start polling when page loads
-    refreshEventCount();
-    setTimeout(pollStatus, 2000);
+  // Poll status so we know when the video is done
+  function pollStatus() {
+    fetch('/check_status')
+      .then(r => r.text())
+      .then(txt => {
+        if (txt.trim() === 'done') {
+          // Show completion overlay (clips may still be finishing in background)
+          doneOverlay.style.display = 'block';
+          if (sessionSource === 'excel') {
+            doneMessage.textContent =
+              'The video has finished. Your labeled clips and log file are being saved ' +
+              'into this person\'s folder. You can now pick another video to label.';
+          } else {
+            doneMessage.textContent =
+              'The video has finished. Your labeled clips and log file are being saved ' +
+              'into the ValidationResults folder.';
+          }
+        } else {
+          setTimeout(pollStatus, 2000);
+        }
+      })
+      .catch(err => {
+        console.error('check_status error:', err);
+        setTimeout(pollStatus, 4000);
+      });
+  }
+  pollStatus();
 </script>
 </body>
 </html>
