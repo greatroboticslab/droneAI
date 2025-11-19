@@ -168,22 +168,35 @@ def import_excel():
 
 @app.route('/pick_from_excel', methods=['GET'])
 def pick_from_excel():
-    from validation_backend import get_progress_summary
+    from validation_backend import get_full_progress
     global EXCEL_ENTRIES
-    progress = get_progress_summary()  # { "John": {"sessions":2,"total_events":5}, ... }
-    # decorate entries with status based on prefix presence
+
+    progress_data = get_full_progress()  # full JSON
+    people = progress_data.get("people", {})
+
     decorated = []
     for e in EXCEL_ENTRIES:
-        prefix = (e["person"] or "").strip()[:4] or "User"
-        rec = progress.get(prefix, {"sessions": 0, "total_events": 0})
+        person = e["person"]
+        link = e["link"]
+        prefix = (person or "").strip()[:4] or "User"
+
+        rec = people.get(prefix, {"sessions": []})
+        sessions = rec.get("sessions", [])
+
+        # Only sessions that match THIS specific video link
+        matching_sessions = [s for s in sessions if s.get("youtube_link") == link]
+        events_for_video = sum(int(s.get("events", 0)) for s in matching_sessions)
+
         decorated.append({
             **e,
             "prefix": prefix,
-            "sessions": rec["sessions"],
-            "total_events": rec["total_events"],
-            "labeled": rec["sessions"] > 0  # green if they have at least 1 session
+            "sessions": len(matching_sessions),      # not shown in table anymore, but kept if needed
+            "total_events": events_for_video,        # events for THIS video
+            "labeled": events_for_video > 0          # green if any labels exist
         })
+
     return render_template('validation_pick.html', entries=decorated)
+
 
 
 
