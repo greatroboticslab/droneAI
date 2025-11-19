@@ -53,8 +53,10 @@ def start_validation_thread(
     global _processing_thread, _video_done, _log_file_path
     global _delete_original, _event_times, _video_duration
 
+    # If a previous session is still running, mark it done so its thread can exit,
+    # then start a new session for this video.
     if _processing_thread and _processing_thread.is_alive():
-        return
+        _video_done = True
 
     _video_done = False
     _event_times = []
