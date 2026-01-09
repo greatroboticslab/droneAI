@@ -1,0 +1,15 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# GUI runtime data
+LabelGUI/YouTubeDownloads/
+LabelGUI/ValidationResults/
+LabelGUI/TrainingResults/
+LabelGUI/Uploads/
+
+# Analysis outputs
+analysis_out/
+analysis/videos/
+analysis/weights/*.pt
