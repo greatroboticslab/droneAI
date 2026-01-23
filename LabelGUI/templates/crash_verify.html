@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Verify Crashes</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .row { display:flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+    .btn { padding: 10px 14px; border: none; border-radius: 10px; cursor:pointer; font-weight:600; }
+    .danger { background:#ef4444; color:#fff; }
+    .primary { background:#2563eb; color:#fff; }
+    .secondary { background:#e5e7eb; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 14px; padding: 12px; }
+    textarea { width: 100%; min-height: 70px; border-radius: 10px; border: 1px solid #ddd; padding: 10px; }
+    .small { font-size:0.9em; color:#555; }
+    .big { font-size:1.15em; font-weight:700; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.85em; }
+    .ok { background:#d1fae5; color:#065f46; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Manual Crash Verification</h1>
+
+  <div class="card">
+    <div class="row">
+      <div><span class="small">Person</span><div class="big">{{ sess.person }}</div></div>
+      <div><span class="small">Scenario</span><div class="big">{{ sess.scenario }}</div></div>
+      <div><span class="small">Predicted crashes</span><div class="big">{{ sess.pred_crash_events }}</div></div>
+      <div><span class="small">Pred / min</span><div class="big">{{ sess.pred_crashes_per_min }}</div></div>
+    </div>
+    <p class="small" style="margin-top:8px;">Link: {{ sess.youtube_link }}</p>
+  </div>
+
+  <br>
+
+  <div class="row">
+    <div class="card">
+      <img id="video" src="/crash_video_feed/{{ sid }}" width="920">
+    </div>
+
+    <div class="card" style="min-width: 280px; flex:1;">
+      <div class="big">Verified crashes: <span id="verified_count">0</span></div>
+      <div class="small">Verified / min: <span id="verified_per_min">0</span></div>
+      <div class="small">Status: <span id="status_text">Running</span></div>
+
+      <br>
+      <button class="btn danger" onclick="markCrash()">Crash +1</button>
+      <button class="btn secondary" onclick="goBack()">Back</button>
+
+      <br><br>
+      <div class="small">Notes (optional)</div>
+      <textarea id="notes" placeholder="e.g., model missed small crashes, false positives, etc."></textarea>
+
+      <br>
+      <button class="btn primary" onclick="finish()">Finish & Save</button>
+
+      <p class="small" id="save_msg" style="margin-top:10px;"></p>
+    </div>
+  </div>
+
+  <script>
+    async function markCrash() {
+      await fetch('/crash_mark/{{ sid }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({})
+      });
+      await refreshStatus();
+    }
+
+    function goBack() {
+      window.location.href = '/crash_analysis';
+    }
+
+    async function refreshStatus() {
+      const r = await fetch('/crash_status/{{ sid }}');
+      const j = await r.json();
+      if (!j.ok) return;
+
+      document.getElementById('verified_count').innerText = j.verified_crash_events;
+      document.getElementById('verified_per_min').innerText = j.verified_crashes_per_min;
+
+      if (j.done) {
+        document.getElementById('status_text').innerText = 'Video ended. Click "Finish & Save".';
+      } else {
+        document.getElementById('status_text').innerText = 'Running';
+      }
+
+      if (j.saved) {
+        document.getElementById('status_text').innerHTML = '<span class="pill ok">Saved</span>';
+      }
+    }
+
+    async function finish() {
+      const notes = document.getElementById('notes').value || '';
+      const form = new FormData();
+      form.append('notes', notes);
+
+      const r = await fetch('/crash_finish/{{ sid }}', { method:'POST', body: form });
+      const j = await r.json();
+      document.getElementById('save_msg').innerText = j.message || '';
+      await refreshStatus();
+    }
+
+    // poll status every second
+    setInterval(refreshStatus, 1000);
+    refreshStatus();
+  </script>
+</div>
+</body>
+</html>
