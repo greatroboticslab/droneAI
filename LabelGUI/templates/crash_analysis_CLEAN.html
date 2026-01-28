@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Crash Analysis + Manual Verification</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__left">
+      <div class="brand">
+        <div class="brand__title">Crash Analysis + Manual Verification</div>
+        <div class="brand__subtitle">Run YOLO inference → manually verify crash counts → export Excel for the paper</div>
+      </div>
+    </div>
+    <nav class="topbar__right">
+      <a class="btn btn--ghost" href="/">Home</a>
+          </nav>
+  </header>
+
+  <main class="container">
+    <p class="muted">
+      This page reads <b>analysis/data/manifest.csv</b> (what to analyze),
+      uses YOLO predictions from <b>analysis/results/per_video.csv</b>,
+      and writes manual verification to <b>analysis/results/verified.csv</b>.
+      An Excel comparison file is written to <b>analysis/results/crash_verification.xlsx</b>.
+    </p>
+
+    {% if not items or items|length == 0 %}
+      <p>No items found in manifest.csv. Add at least one row with columns: person, scenario, youtube_link.</p>
+    {% else %}
+
+      <div style="overflow:auto; border-radius:12px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Person</th>
+            <th>Scenario</th>
+            <th>Pred crashes</th>
+            <th>Pred / min</th>
+            <th>Verified crashes</th>
+            <th>Verified / min</th>
+            <th>Link</th>
+            <th style="min-width: 230px;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in items %}
+            <tr>
+              <td>
+                {% if e.verified %}
+                  <span class="chip chip--ok">Verified</span>
+                {% else %}
+                  <span class="chip chip--no">Not verified</span>
+                {% endif %}
+              </td>
+              <td><b>{{ e.person }}</b></td>
+              <td>{{ e.scenario }}</td>
+              <td>{{ e.pred_crashes }}</td>
+              <td>{{ e.pred_per_min }}</td>
+              <td>{{ e.ver_crashes }}</td>
+              <td>{{ e.ver_per_min }}</td>
+              <td style="max-width: 320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                <a href="{{ e.youtube_link }}" target="_blank" style="color:#93c5fd;">{{ e.youtube_link }}</a>
+              </td>
+              <td>
+                <form method="POST" action="/crash_run_and_verify" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+                  <input type="hidden" name="row_id" value="{{ e.row_id if e.row_id is defined else loop.index0 }}">
+                  <div>
+                    <label style="font-size:12px;">sample_fps</label><br/>
+                    <input name="sample_fps" value="{{ e.sample_fps }}" style="width:92px;">
+                  </div>
+                  <div>
+                    <label style="font-size:12px;">conf</label><br/>
+                    <input name="conf" value="{{ e.conf }}" style="width:92px;">
+                  </div>
+                  <button type="submit" class="btn btn--primary">Run + Verify</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      <p class="muted" style="margin-top:10px;">
+        Tip: start with <b>sample_fps=2</b> and <b>conf=0.5</b>. If predictions miss crashes, lower conf (e.g., 0.35) or increase fps.
+      </p>
+    {% endif %}
+  </main>
+</body>
+</html>

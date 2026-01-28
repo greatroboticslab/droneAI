@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DroneAI GUI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__left">
+      <div class="brand">
+        <div class="brand__title">DroneAI</div>
+        <div class="brand__subtitle">Labeling + Crash Analysis</div>
+      </div>
+    </div>
+    <nav class="topbar__right">
+      <a class="btn btn--ghost" href="/crash_analysis">Crash Analysis / Verification</a>
+    </nav>
+  </header>
+
+  <main class="home">
+    <section class="home-card home-card--blue">
+      <div class="home-card__content">
+        <h1>Label Validation Data</h1>
+        <p>
+          Import an Excel sheet, select a video, and mark events (takeoff/landing/crash).
+          Clips + logs are saved automatically.
+        </p>
+        <div class="home-card__actions">
+          <a class="btn btn--primary" href="/import_excel">Start Validation (Excel)</a>
+          <a class="btn btn--ghost" href="/validation_index">Manual Link</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-card home-card--green">
+      <div class="home-card__content">
+        <h1>Label Training Data</h1>
+        <p>
+          Collect training frames for your label set and export metadata for ML training.
+        </p>
+        <div class="home-card__actions">
+          <a class="btn btn--primary" href="/training_index">Start Training</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>DroneAI — Labeling &amp; Verification GUI</span>
+  </footer>
+</body>
+</html>
