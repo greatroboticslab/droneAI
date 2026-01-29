@@ -66,18 +66,24 @@
                 <a href="{{ e.youtube_link }}" target="_blank" style="color:#93c5fd;">{{ e.youtube_link }}</a>
               </td>
               <td>
-                <form method="POST" action="{{ url_for('crash_run') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
-                  <input type="hidden" name="row_id" value="{{ e.row_id if e.row_id is defined else loop.index0 }}">
+                <form method="POST" action="/crash_run" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+                  <input type="hidden" name="person" value="{{ e.person }}">
+                  <input type="hidden" name="scenario" value="{{ e.scenario }}">
+                  <input type="hidden" name="youtube_link" value="{{ e.youtube_link }}">
+                
                   <div>
                     <label style="font-size:12px;">sample_fps</label><br/>
                     <input name="sample_fps" value="{{ e.sample_fps }}" style="width:92px;">
                   </div>
+                
                   <div>
                     <label style="font-size:12px;">conf</label><br/>
                     <input name="conf" value="{{ e.conf }}" style="width:92px;">
                   </div>
+                
                   <button type="submit" class="btn btn--primary">Run + Verify</button>
                 </form>
+
               </td>
             </tr>
           {% endfor %}
