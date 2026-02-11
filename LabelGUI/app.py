@@ -335,6 +335,13 @@ def crash_analysis():
 
     return render_template("crash_analysis.html", items=items)
 
+@app.route("/crash_export_excel")
+def crash_export_excel():
+    from make_verification_excel import write_verification_excel
+    out = write_verification_excel()
+    return f"Excel exported successfully: {out}"
+
+
 
 @app.route('/crash_run', methods=['POST'])
 def crash_run():
