@@ -335,11 +335,29 @@ def crash_analysis():
 
     return render_template("crash_analysis.html", items=items)
 
-@app.route("/crash_export_excel")
-def crash_export_excel():
-    from make_verification_excel import write_verification_excel
-    out = write_verification_excel()
-    return f"Excel exported successfully: {out}"
+from flask import send_file
+import subprocess, sys
+
+@app.route("/crash_export", methods=["GET"])
+def crash_export():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(base_dir, ".."))  # DroneAI/
+    results_dir = os.path.join(repo_root, "analysis", "results")
+    script_path = os.path.join(repo_root, "analysis", "scripts", "make_verification_excel.py")
+    out_xlsx = os.path.join(results_dir, "crash_verification.xlsx")
+
+    # Make sure results folder exists
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Run the excel generator
+    subprocess.run(
+        [sys.executable, script_path, "--results", results_dir],
+        check=True
+    )
+
+    # Return the file
+    return send_file(out_xlsx, as_attachment=True)
+
 
 
 
