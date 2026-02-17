@@ -3,97 +3,92 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Crash Analysis + Manual Verification</title>
+  <title>Crash Analysis / Verification</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="topbar">
-    <div class="topbar__left">
-      <div class="brand">
-        <div class="brand__title">Crash Analysis + Manual Verification</div>
-        <div class="brand__subtitle">Run YOLO inference → manually verify crash counts → export Excel for the paper</div>
-      </div>
+    <div class="brand">
+      <div class="brand__title">Crash Analysis / Verification</div>
+      <div class="brand__subtitle">Compare YOLO predicted crash counts vs human verification</div>
     </div>
-    <nav class="topbar__right">
-      <a class="btn btn--ghost" href="/">Home</a>
-          </nav>
+    <a class="btn btn--ghost" href="/">Home</a>
   </header>
 
   <main class="container">
     <p class="muted">
-      This page reads <b>analysis/data/manifest.csv</b> (what to analyze),
-      uses YOLO predictions from <b>analysis/results/per_video.csv</b>,
-      and writes manual verification to <b>analysis/results/verified.csv</b>.
-      An Excel comparison file is written to <b>analysis/results/crash_verification.xlsx</b>.
+      Reads <b>analysis/data/manifest.csv</b> and <b>analysis/results/per_video.csv</b>.
+      Saves verification to SQLite (<b>db/droneai.sqlite</b>) and exports Excel to <b>analysis/results/crash_verification.xlsx</b>.
     </p>
 
     {% if not items or items|length == 0 %}
-      <p>No items found in manifest.csv. Add at least one row with columns: person, scenario, youtube_link.</p>
+      <div class="card">
+        <h3>No items found</h3>
+        <p>Add at least one row in <code>analysis/data/manifest.csv</code> with columns:</p>
+        <code>person,scenario,youtube_link</code>
+      </div>
     {% else %}
-
-      <div style="overflow:auto; border-radius:12px;">
-      <table>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Person</th>
-            <th>Scenario</th>
-            <th>Pred crashes</th>
-            <th>Pred / min</th>
-            <th>Verified crashes</th>
-            <th>Verified / min</th>
-            <th>Link</th>
-            <th style="min-width: 230px;">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for e in items %}
+      <div class="card" style="overflow:auto;">
+        <table>
+          <thead>
             <tr>
-              <td>
-                {% if e.verified %}
-                  <span class="chip chip--ok">Verified</span>
-                {% else %}
-                  <span class="chip chip--no">Not verified</span>
-                {% endif %}
-              </td>
-              <td><b>{{ e.person }}</b></td>
-              <td>{{ e.scenario }}</td>
-              <td>{{ e.pred_crashes }}</td>
-              <td>{{ e.pred_per_min }}</td>
-              <td>{{ e.ver_crashes }}</td>
-              <td>{{ e.ver_per_min }}</td>
-              <td style="max-width: 320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                <a href="{{ e.youtube_link }}" target="_blank" style="color:#93c5fd;">{{ e.youtube_link }}</a>
-              </td>
-              <td>
-                <form method="POST" action="/crash_run" style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
-                  <input type="hidden" name="person" value="{{ e.person }}">
-                  <input type="hidden" name="scenario" value="{{ e.scenario }}">
-                  <input type="hidden" name="youtube_link" value="{{ e.youtube_link }}">
-                
-                  <div>
-                    <label style="font-size:12px;">sample_fps</label><br/>
-                    <input name="sample_fps" value="{{ e.sample_fps }}" style="width:92px;">
-                  </div>
-                
-                  <div>
-                    <label style="font-size:12px;">conf</label><br/>
-                    <input name="conf" value="{{ e.conf }}" style="width:92px;">
-                  </div>
-                
-                  <button type="submit" class="btn btn--primary">Run + Verify</button>
-                </form>
-
-              </td>
+              <th>Status</th>
+              <th>Person</th>
+              <th>Scenario</th>
+              <th>Pred crashes</th>
+              <th>Pred/min</th>
+              <th>Verified crashes</th>
+              <th>Verified/min</th>
+              <th>Link</th>
+              <th>Action</th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for e in items %}
+              <tr>
+                <td>
+                  {% if e.verified %}
+                    <span class="chip chip--ok">Verified</span>
+                  {% else %}
+                    <span class="chip chip--no">Not verified</span>
+                  {% endif %}
+                </td>
+                <td><b>{{ e.person }}</b></td>
+                <td>{{ e.scenario }}</td>
+                <td>{{ e.pred_crashes }}</td>
+                <td>{{ e.pred_per_min }}</td>
+                <td>{{ e.ver_crashes }}</td>
+                <td>{{ e.ver_per_min }}</td>
+                <td class="truncate">
+                  <a href="{{ e.youtube_link }}" target="_blank">{{ e.youtube_link }}</a>
+                </td>
+                <td>
+                  <form method="POST" action="/crash_run" class="rowform">
+                    <input type="hidden" name="row_id" value="{{ e.row_id }}">
+                    <input type="hidden" name="person" value="{{ e.person }}">
+                    <input type="hidden" name="scenario" value="{{ e.scenario }}">
+                    <input type="hidden" name="youtube_link" value="{{ e.youtube_link }}">
+                    <div>
+                      <label>sample_fps</label>
+                      <input name="sample_fps" value="{{ e.sample_fps }}">
+                    </div>
+                    <div>
+                      <label>conf</label>
+                      <input name="conf" value="{{ e.conf }}">
+                    </div>
+                    <button class="btn btn--primary" type="submit">Run + Verify</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
 
-      <p class="muted" style="margin-top:10px;">
-        Tip: start with <b>sample_fps=2</b> and <b>conf=0.5</b>. If predictions miss crashes, lower conf (e.g., 0.35) or increase fps.
-      </p>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <a class="btn btn--secondary" href="/crash_analysis">Refresh table</a>
+        <a class="btn btn--primary" href="/crash_export_excel">Export Excel</a>
+      </div>
     {% endif %}
   </main>
 </body>
