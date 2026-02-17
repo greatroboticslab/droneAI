@@ -31,7 +31,7 @@
         <p><b>Verified:</b> <span id="verCount">{{ ver_crashes }}</span> crashes</p>
 
         <label style="margin-top:12px; display:block;">Notes (optional)</label>
-        <textarea id="notes" rows="4" style="width:100%;"></textarea>
+        <textarea id="notes" rows="4" style="width:100%;">{{ notes }}</textarea>
 
         <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
           <button class="btn btn--primary" id="plusBtn">+1 Crash</button>
@@ -54,6 +54,8 @@ async function postJSON(url, data){
   return await res.json();
 }
 
+function setMsg(text){ document.getElementById("msg").textContent = text || ""; }
+
 document.getElementById("plusBtn").onclick = async () => {
   const r = await postJSON("/crash_mark/{{ sid }}", {});
   if(r.ok){
@@ -64,13 +66,21 @@ document.getElementById("plusBtn").onclick = async () => {
 document.getElementById("saveLaterBtn").onclick = async () => {
   const notes = document.getElementById("notes").value;
   const r = await postJSON("/crash_save_later/{{ sid }}", {notes});
-  document.getElementById("msg").textContent = r.message || "Saved";
+  setMsg(r.message || "Saved ✅");
 };
 
 document.getElementById("finishBtn").onclick = async () => {
   const notes = document.getElementById("notes").value;
   const r = await postJSON("/crash_finish/{{ sid }}", {notes});
-  document.getElementById("msg").textContent = r.message || "Saved";
+  setMsg(r.message || "Final saved ✅");
+
+  // lock UI so user can't keep changing it
+  document.getElementById("plusBtn").disabled = true;
+  document.getElementById("saveLaterBtn").disabled = true;
+  document.getElementById("finishBtn").disabled = true;
+
+  // go back to table after a short moment
+  setTimeout(() => { window.location.href = "/crash_analysis"; }, 700);
 };
 </script>
 </body>
