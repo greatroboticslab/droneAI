@@ -206,7 +206,8 @@ def start_from_excel():
         person_name=match["person"],
         scenario_base=scenario_base,
     )
-    return redirect(url_for("validation_view_stream"))
+    return redirect(url_for("validation_view_stream", source="excel"))
+
 
 
 ###############################################################################
