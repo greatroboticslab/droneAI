@@ -390,6 +390,11 @@ def training_video_feed():
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
 
+@app.route("/validation_view_stream")
+def validation_view_stream():
+    source = request.args.get("source", "manual")
+    return render_template("validation_results.html", source=source)
+
 
 @app.route("/training_check_status")
 def training_check_status():
