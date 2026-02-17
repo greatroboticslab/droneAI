@@ -1,0 +1,7 @@
+flask
+pandas
+openpyxl
+opencv-python
+yt-dlp
+ultralytics
+numpy
