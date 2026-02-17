@@ -3,127 +3,75 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Manual Crash Verification</title>
+  <title>Verify Crashes</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <style>
-    .grid { display:grid; grid-template-columns: 1.6fr 0.8fr; gap: 14px; align-items:start; }
-    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px; }
-    .kv { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .k { font-size: 12px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .4px; }
-    .v { font-size: 16px; font-weight: 900; }
-    .video-wrap { display:flex; justify-content:center; padding: 10px; }
-    img#video { width: 100%; max-width: 920px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); }
-    textarea { width: 100%; min-height: 90px; }
-  </style>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
       <div class="brand__title">Manual Crash Verification</div>
-      <div class="brand__subtitle">Click “Crash +1” each time you observe a crash. Then Finish & Save.</div>
+      <div class="brand__subtitle">{{ person }} — {{ scenario }}</div>
     </div>
-    <nav class="topbar__right">
-      <a class="btn btn--ghost" href="/crash_analysis">Back to list</a>
-      <a class="btn btn--ghost" href="/crash_export">Export Excel</a>
-
-
-    </nav>
+    <a class="btn btn--ghost" href="/crash_analysis">Back</a>
   </header>
 
   <main class="container">
-    <div class="panel">
-      <div class="kv">
-        <div>
-          <div class="k">Person</div>
-          <div class="v">{{ sess.person }}</div>
-        </div>
-        <div>
-          <div class="k">Scenario</div>
-          <div class="v">{{ sess.scenario }}</div>
-        </div>
-        <div>
-          <div class="k">Predicted crashes</div>
-          <div class="v">{{ sess.pred_crash_events }}</div>
-        </div>
-        <div>
-          <div class="k">Pred / min</div>
-          <div class="v">{{ sess.pred_crashes_per_min }}</div>
-        </div>
-      </div>
-      <div class="muted" style="margin-top:10px;">
-        Video link: <a href="{{ sess.youtube_link }}" target="_blank" style="color:#93c5fd;">{{ sess.youtube_link }}</a>
-      </div>
-    </div>
-
-    <div style="height: 12px;"></div>
-
     <div class="grid">
-      <div class="panel video-wrap">
-        <img id="video" src="/crash_video_feed/{{ sid }}" alt="video stream">
+      <div class="card">
+        <h3>Video</h3>
+        <div class="videoWrap">
+          <img src="/crash_video_feed/{{ sid }}" />
+        </div>
+        <p class="muted">Click “+1 Crash” when you see a crash event.</p>
       </div>
 
-      <div class="panel">
-        <div class="v" style="margin-bottom:8px;">Verified crashes: <span id="verified_count">0</span></div>
-        <div class="muted">Verified / min: <span id="verified_per_min">0</span></div>
-        <div class="muted">Status: <span id="status_text">Running</span></div>
+      <div class="card">
+        <h3>Counts</h3>
+        <p><b>Predicted:</b> {{ pred_crashes }} crashes ({{ pred_per_min }}/min)</p>
+        <p><b>Verified:</b> <span id="verCount">{{ ver_crashes }}</span> crashes</p>
 
-        <div style="height: 12px;"></div>
+        <label style="margin-top:12px; display:block;">Notes (optional)</label>
+        <textarea id="notes" rows="4" style="width:100%;"></textarea>
 
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn btn--danger" onclick="markCrash()">Crash +1</button>
-          <button class="btn btn--primary" onclick="finish()">Finish & Save</button>
+        <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn btn--primary" id="plusBtn">+1 Crash</button>
+          <button class="btn btn--secondary" id="saveLaterBtn">Save & Label Later</button>
+          <button class="btn btn--primary" id="finishBtn">Finish & Save</button>
         </div>
 
-        <div style="height: 14px;"></div>
-
-        <div class="k">Notes (optional)</div>
-        <textarea id="notes" placeholder="e.g., missed small crashes, false positives, unclear sections..."></textarea>
-
-        <p class="muted" id="save_msg" style="margin-top:10px;"></p>
+        <p id="msg" class="muted" style="margin-top:10px;"></p>
       </div>
     </div>
-
-    <script>
-      async function markCrash() {
-        await fetch('/crash_mark/{{ sid }}', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({})
-        });
-        await refreshStatus();
-      }
-
-      async function refreshStatus() {
-        const r = await fetch('/crash_status/{{ sid }}');
-        const j = await r.json();
-        if (!j.ok) return;
-
-        document.getElementById('verified_count').innerText = j.verified_crash_events;
-        document.getElementById('verified_per_min').innerText = j.verified_crashes_per_min;
-
-        if (j.saved) {
-          document.getElementById('status_text').innerHTML = 'Saved ✅';
-        } else if (j.done) {
-          document.getElementById('status_text').innerText = 'Video ended — click “Finish & Save”.';
-        } else {
-          document.getElementById('status_text').innerText = 'Running';
-        }
-      }
-
-      async function finish() {
-        const notes = document.getElementById('notes').value || '';
-        const form = new FormData();
-        form.append('notes', notes);
-
-        const r = await fetch('/crash_finish/{{ sid }}', { method:'POST', body: form });
-        const j = await r.json();
-        document.getElementById('save_msg').innerText = j.message || '';
-        await refreshStatus();
-      }
-
-      setInterval(refreshStatus, 1000);
-      refreshStatus();
-    </script>
   </main>
+
+<script>
+async function postJSON(url, data){
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(data)
+  });
+  return await res.json();
+}
+
+document.getElementById("plusBtn").onclick = async () => {
+  const r = await postJSON("/crash_mark/{{ sid }}", {});
+  if(r.ok){
+    document.getElementById("verCount").textContent = r.verified_crash_events;
+  }
+};
+
+document.getElementById("saveLaterBtn").onclick = async () => {
+  const notes = document.getElementById("notes").value;
+  const r = await postJSON("/crash_save_later/{{ sid }}", {notes});
+  document.getElementById("msg").textContent = r.message || "Saved";
+};
+
+document.getElementById("finishBtn").onclick = async () => {
+  const notes = document.getElementById("notes").value;
+  const r = await postJSON("/crash_finish/{{ sid }}", {notes});
+  document.getElementById("msg").textContent = r.message || "Saved";
+};
+</script>
 </body>
 </html>
