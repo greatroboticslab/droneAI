@@ -1,189 +1,208 @@
+# LabelGUI/db/db_store.py
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 
-def _base_dir():
-    return os.path.dirname(os.path.abspath(__file__))
+def _repo_root():
+    # LabelGUI/db/db_store.py -> repo root is 2 levels up
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def db_path():
-    db_dir = os.path.join(_base_dir(), "db")
-    os.makedirs(db_dir, exist_ok=True)
-    return os.path.join(db_dir, "droneai.sqlite")
+    # keep DB inside LabelGUI/db/
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(base_dir, exist_ok=True)
+    return os.path.join(base_dir, "droneai.sqlite")
 
+@contextmanager
 def connect():
-    conn = sqlite3.connect(db_path(), check_same_thread=False)
+    path = db_path()
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
-def init_db():
-    conn = connect()
-    cur = conn.cursor()
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS videos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person TEXT NOT NULL,
-        scenario TEXT NOT NULL,
-        youtube_link TEXT NOT NULL,
-        UNIQUE(person, scenario, youtube_link)
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS inference_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        video_id INTEGER NOT NULL,
-        sample_fps REAL,
-        conf REAL,
-        predicted_crash_events INTEGER,
-        predicted_crashes_per_min REAL,
-        duration_sec REAL,
-        video_path TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(video_id) REFERENCES videos(id)
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS verify_runs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        video_id INTEGER NOT NULL,
-        role TEXT NOT NULL,              -- 'label' or 'review'
-        user_name TEXT NOT NULL,
-        parent_run_id INTEGER,           -- review can point to label run
-        status TEXT NOT NULL,            -- 'in_progress', 'saved', 'submitted'
-        verified_crash_events INTEGER DEFAULT 0,
-        verified_crashes_per_min REAL DEFAULT 0,
-        notes TEXT DEFAULT '',
-        last_time_sec REAL DEFAULT 0,    -- resume position
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(video_id) REFERENCES videos(id),
-        FOREIGN KEY(parent_run_id) REFERENCES verify_runs(id)
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS verify_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        run_id INTEGER NOT NULL,
-        t_sec REAL NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(run_id) REFERENCES verify_runs(id)
-    )
-    """)
-
-    conn.commit()
-    conn.close()
-
-def now_iso():
+def utcnow():
     return datetime.utcnow().isoformat()
 
-def get_or_create_video(person, scenario, youtube_link):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT OR IGNORE INTO videos(person, scenario, youtube_link)
-        VALUES(?,?,?)
-    """, (person, scenario, youtube_link))
-    conn.commit()
-    cur.execute("""
-        SELECT id FROM videos WHERE person=? AND scenario=? AND youtube_link=?
-    """, (person, scenario, youtube_link))
-    row = cur.fetchone()
-    conn.close()
-    return int(row["id"])
+def init_db():
+    with connect() as conn:
+        cur = conn.cursor()
 
-def insert_inference(video_id, sample_fps, conf, pred_events, pred_per_min, duration_sec, video_path):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO inference_runs(video_id, sample_fps, conf, predicted_crash_events, predicted_crashes_per_min,
-                                   duration_sec, video_path, created_at)
-        VALUES(?,?,?,?,?,?,?,?)
-    """, (video_id, sample_fps, conf, pred_events, pred_per_min, duration_sec, video_path, now_iso()))
-    conn.commit()
-    rid = cur.lastrowid
-    conn.close()
-    return int(rid)
+        # videos: one per (person, scenario, youtube_link)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS videos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person TEXT NOT NULL,
+            scenario TEXT NOT NULL,
+            youtube_link TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(person, scenario, youtube_link)
+        )
+        """)
 
-def latest_inference(video_id):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT * FROM inference_runs WHERE video_id=? ORDER BY id DESC LIMIT 1
-    """, (video_id,))
-    row = cur.fetchone()
-    conn.close()
-    return dict(row) if row else None
+        # inference results (latest result kept, can be extended later)
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS inference_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id INTEGER NOT NULL,
+            crash_events INTEGER,
+            crashes_per_min REAL,
+            duration_sec REAL,
+            video_path TEXT,
+            model_weights TEXT,
+            sample_fps REAL,
+            conf REAL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(video_id) REFERENCES videos(id)
+        )
+        """)
 
-def create_verify_run(video_id, role, user_name, parent_run_id=None):
-    conn = connect()
-    cur = conn.cursor()
-    t = now_iso()
-    cur.execute("""
-        INSERT INTO verify_runs(video_id, role, user_name, parent_run_id, status, created_at, updated_at)
-        VALUES(?,?,?,?,?,?,?)
-    """, (video_id, role, user_name, parent_run_id, "in_progress", t, t))
-    conn.commit()
-    rid = cur.lastrowid
-    conn.close()
-    return int(rid)
+        # labeling/review runs
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS verification_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id INTEGER NOT NULL,
+            run_type TEXT NOT NULL,     -- "label" or "review"
+            labeler TEXT,               -- who did it
+            status TEXT NOT NULL,       -- "in_progress" | "paused" | "submitted"
+            verified_crash_events INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            last_time_sec REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY(video_id) REFERENCES videos(id)
+        )
+        """)
 
-def set_verify_status(run_id, status, last_time_sec=None, notes=None):
-    conn = connect()
-    cur = conn.cursor()
-    fields = ["status=?", "updated_at=?"]
-    vals = [status, now_iso()]
-    if last_time_sec is not None:
-        fields.append("last_time_sec=?")
-        vals.append(float(last_time_sec))
-    if notes is not None:
-        fields.append("notes=?")
-        vals.append(notes)
-    vals.append(run_id)
-    cur.execute(f"UPDATE verify_runs SET {', '.join(fields)} WHERE id=?", vals)
-    conn.commit()
-    conn.close()
+        # crash click timestamps for each run
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS verification_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            t_sec REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(run_id) REFERENCES verification_runs(id)
+        )
+        """)
 
-def add_verify_event(run_id, t_sec):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO verify_events(run_id, t_sec, created_at) VALUES(?,?,?)
-    """, (run_id, float(t_sec), now_iso()))
-    conn.commit()
-    conn.close()
+def get_or_create_video(person: str, scenario: str, youtube_link: str) -> int:
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM videos WHERE person=? AND scenario=? AND youtube_link=?",
+            (person, scenario, youtube_link),
+        )
+        row = cur.fetchone()
+        if row:
+            return int(row["id"])
 
-def compute_verify_counts(run_id, duration_sec):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS n FROM verify_events WHERE run_id=?", (run_id,))
-    n = int(cur.fetchone()["n"])
-    per_min = (n / (duration_sec / 60.0)) if duration_sec and duration_sec > 0 else 0.0
-    cur.execute("""
-        UPDATE verify_runs SET verified_crash_events=?, verified_crashes_per_min=?, updated_at=?
-        WHERE id=?
-    """, (n, float(per_min), now_iso(), run_id))
-    conn.commit()
-    conn.close()
-    return n, per_min
+        cur.execute(
+            "INSERT INTO videos(person, scenario, youtube_link, created_at) VALUES(?,?,?,?)",
+            (person, scenario, youtube_link, utcnow()),
+        )
+        return int(cur.lastrowid)
 
-def get_verify_run(run_id):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM verify_runs WHERE id=?", (run_id,))
-    row = cur.fetchone()
-    conn.close()
-    return dict(row) if row else None
+def add_inference_result(video_id: int, crash_events, crashes_per_min, duration_sec, video_path,
+                         model_weights, sample_fps, conf):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO inference_results(
+              video_id, crash_events, crashes_per_min, duration_sec, video_path,
+              model_weights, sample_fps, conf, created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+        """, (
+            video_id,
+            None if crash_events == "" else int(crash_events),
+            None if crashes_per_min == "" else float(crashes_per_min),
+            None if duration_sec == "" else float(duration_sec),
+            video_path,
+            model_weights,
+            float(sample_fps) if sample_fps is not None else None,
+            float(conf) if conf is not None else None,
+            utcnow(),
+        ))
 
-def list_verify_runs_for_video(video_id):
-    conn = connect()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT * FROM verify_runs WHERE video_id=? ORDER BY id DESC
-    """, (video_id,))
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+def latest_inference(video_id: int):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM inference_results
+            WHERE video_id=?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (video_id,))
+        r = cur.fetchone()
+        return dict(r) if r else None
 
+def create_run(video_id: int, run_type="label", labeler=""):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO verification_runs(video_id, run_type, labeler, status, started_at)
+            VALUES(?,?,?,?,?)
+        """, (video_id, run_type, labeler, "in_progress", utcnow()))
+        return int(cur.lastrowid)
+
+def load_run(run_id: int):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM verification_runs WHERE id=?", (run_id,))
+        r = cur.fetchone()
+        return dict(r) if r else None
+
+def load_video(video_id: int):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM videos WHERE id=?", (video_id,))
+        r = cur.fetchone()
+        return dict(r) if r else None
+
+def set_run_status(run_id: int, status: str, last_time_sec=None, notes=None):
+    with connect() as conn:
+        cur = conn.cursor()
+        if last_time_sec is None and notes is None:
+            cur.execute("UPDATE verification_runs SET status=? WHERE id=?", (status, run_id))
+        elif last_time_sec is None:
+            cur.execute("UPDATE verification_runs SET status=?, notes=? WHERE id=?", (status, notes, run_id))
+        elif notes is None:
+            cur.execute("UPDATE verification_runs SET status=?, last_time_sec=? WHERE id=?", (status, float(last_time_sec), run_id))
+        else:
+            cur.execute("UPDATE verification_runs SET status=?, last_time_sec=?, notes=? WHERE id=?",
+                        (status, float(last_time_sec), notes, run_id))
+
+def finish_run(run_id: int, notes: str):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE verification_runs
+            SET status=?, notes=?, finished_at=?
+            WHERE id=?
+        """, ("submitted", notes, utcnow(), run_id))
+
+def increment_run_count(run_id: int, t_sec: float):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO verification_events(run_id, t_sec, created_at)
+            VALUES(?,?,?)
+        """, (run_id, float(t_sec), utcnow()))
+        cur.execute("""
+            UPDATE verification_runs
+            SET verified_crash_events = verified_crash_events + 1
+            WHERE id=?
+        """, (run_id,))
+
+def list_events(run_id: int):
+    with connect() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT t_sec FROM verification_events
+            WHERE run_id=?
+            ORDER BY id ASC
+        """, (run_id,))
+        return [float(r["t_sec"]) for r in cur.fetchall()]
