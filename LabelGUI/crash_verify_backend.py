@@ -1,276 +1,231 @@
-import os
+# LabelGUI/crash_verify_backend.py
+import os, csv, uuid, time
+from pathlib import Path
+from typing import Dict, Any, List
+
 import cv2
-import time
-import json
-from datetime import timedelta
-from typing import Optional, Dict, Any, List
-
 import video_utils
+from validation_backend import download_video
 
-# DB storage
-try:
-    from db.db_store import (
-        init_db,
-        upsert_video,
-        get_latest_prediction,
-        get_latest_verification,
-        get_active_draft,
-        create_verification,
-        update_verification_counts,
-        submit_verification,
-        override_verification,
-        list_verification_history,
-    )
-except Exception:
-    # If DB folder not available, crash verification won't work.
-    init_db = None
+from db.db_store import DBStore
 
-# -----------------------------------------------------------------------------
-# Single active session at a time (keeps UI simple and stable)
-# -----------------------------------------------------------------------------
-_STATE: Dict[str, Any] = {
-    "sid": None,
+BASE_DIR = Path(__file__).resolve().parent          # LabelGUI/
+REPO_DIR = BASE_DIR.parent                          # DroneAI/
+ANALYSIS_DIR = REPO_DIR / "analysis"
+MANIFEST = ANALYSIS_DIR / "data" / "manifest.csv"
+RESULTS_DIR = ANALYSIS_DIR / "results"
+PER_VIDEO = RESULTS_DIR / "per_video.csv"
+DOWNLOADS = ANALYSIS_DIR / "downloads"
+DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
 
-    # identity
-    "video_id": None,
-    "verification_id": None,
-    "video_path": None,
-    "person": None,
-    "scenario": None,
-    "youtube_link": None,
+DOWNLOADS.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+(REPO_DIR / "db").mkdir(parents=True, exist_ok=True)
 
-    # model prediction
-    "pred_crash_events": 0,
-    "pred_crashes_per_min": 0.0,
+db = DBStore(str(DB_PATH))
 
-    # manual verification (live)
-    "verified_crash_events": 0,
-    "verified_times_sec": [],
+_ACTIVE: Dict[str, Dict[str, Any]] = {}  # sid -> session dict
 
-    # playback
-    "duration_sec": 0.0,
-    "done": False,
-    "saved": False,
-    "last_error": None,
 
-    # who is verifying
-    "verifier": "",
-    "role": "labeler",  # labeler | reviewer
-}
+def _read_manifest_rows() -> List[Dict[str, str]]:
+    if not MANIFEST.exists():
+        return []
+    raw = MANIFEST.read_text(encoding="utf-8-sig")
+    first = raw.splitlines()[0] if raw.splitlines() else ""
+    delim = "\t" if "\t" in first and "," not in first else ","
 
-def _repo_root() -> str:
-    # LabelGUI/crash_verify_backend.py -> repo root is one level up
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(MANIFEST, "r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f, delimiter=delim)
+        cols = {c.lower().strip(): c for c in (reader.fieldnames or [])}
+        for need in ("person", "scenario", "youtube_link"):
+            if need not in cols:
+                raise ValueError(f"manifest missing required column: {need}")
 
-def _analysis_results_dir() -> str:
-    return os.path.join(_repo_root(), "analysis", "results")
+        rows = []
+        for r in reader:
+            person = (r[cols["person"]] or "").strip()
+            scenario = (r[cols["scenario"]] or "").strip()
+            link = (r[cols["youtube_link"]] or "").strip()
+            if person and scenario and link:
+                rows.append({"person": person, "scenario": scenario, "youtube_link": link})
+        return rows
 
-def _safe_float(x, default=0.0) -> float:
-    try:
-        return float(x)
-    except Exception:
-        return float(default)
 
-def _safe_int(x, default=0) -> int:
-    try:
-        return int(float(x))
-    except Exception:
-        return int(default)
+def _read_per_video() -> List[Dict[str, str]]:
+    if not PER_VIDEO.exists():
+        return []
+    with open(PER_VIDEO, "r", encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
 
-def get_state() -> Dict[str, Any]:
-    return dict(_STATE)
 
-def start_crash_verify_session(
-    sid: str,
-    video_path: str,
-    person: str,
-    scenario: str,
-    youtube_link: str,
-    verifier: str = "",
-    role: str = "labeler",
-    predicted_crash_events: Optional[int] = None,
-    predicted_crashes_per_min: Optional[float] = None,
-):
-    """
-    Starts (or resumes) a manual verification session.
+def list_items_for_table() -> List[Dict[str, Any]]:
+    manifest_rows = _read_manifest_rows()
+    pv = _read_per_video()
 
-    - Uses SQLite to store progress.
-    - If the same verifier already has a DRAFT for this video, we resume it.
-    - If role=reviewer and there is a latest submitted verification, we keep it as history
-      and create a new draft that can override it upon submit.
-    """
-    global _STATE
+    def match_pred(person, scenario, link):
+        # exact match first
+        for r in pv:
+            if (r.get("youtube_link") or "").strip() == link.strip():
+                return r
+        # fallback match person+scenario
+        for r in pv:
+            if (r.get("person") or "").strip() == person.strip() and (r.get("scenario") or "").strip().lower() == scenario.strip().lower():
+                return r
+        return {}
 
-    if init_db is None:
-        _STATE["last_error"] = "DB import failed. Ensure db/db_store.py exists."
-        return
+    out = []
+    for i, m in enumerate(manifest_rows):
+        pred = match_pred(m["person"], m["scenario"], m["youtube_link"])
+        pred_events = int(float(pred.get("crash_events", 0) or 0))
+        pred_per_min = float(pred.get("crashes_per_min", 0) or 0)
 
-    init_db()
+        latest = db.get_latest_by_key(m["person"], m["scenario"], m["youtube_link"])
+        verified = bool(latest and latest.get("status") in ("saved", "final"))
 
-    # Ensure the video exists in DB
-    vid = upsert_video(person=person, scenario=scenario, youtube_link=youtube_link)
+        out.append({
+            "row_id": i,
+            "person": m["person"],
+            "scenario": m["scenario"],
+            "youtube_link": m["youtube_link"],
+            "pred_crashes": pred_events,
+            "pred_per_min": f"{pred_per_min:.3f}",
+            "verified": verified,
+            "ver_crashes": (latest.get("verified_crash_events") if latest else ""),
+            "ver_per_min": (f"{float(latest.get('verified_crashes_per_min', 0)):.3f}" if latest else ""),
+            "sample_fps": "2",
+            "conf": "0.5",
+        })
+    return out
 
-    # Pull latest model prediction if caller didn't provide
-    if predicted_crash_events is None or predicted_crashes_per_min is None:
-        pred = get_latest_prediction(vid) or {}
-        if predicted_crash_events is None:
-            predicted_crash_events = pred.get("pred_crash_events", 0)
-        if predicted_crashes_per_min is None:
-            predicted_crashes_per_min = pred.get("pred_crashes_per_min", 0.0)
 
-    verifier = (verifier or "").strip()
-    role = (role or "labeler").strip().lower()
-    if role not in ("labeler", "reviewer"):
-        role = "labeler"
+def start_session(person: str, scenario: str, youtube_link: str, sample_fps: float, conf: float) -> str:
+    sid = uuid.uuid4().hex[:12]
 
-    # Resume draft for this verifier if present
-    draft = get_active_draft(vid, verifier) if verifier else None
+    # predicted values (if per_video.csv exists)
+    pv = _read_per_video()
+    pred = {}
+    for r in pv:
+        if (r.get("youtube_link") or "").strip() == youtube_link.strip():
+            pred = r
+            break
 
-    # If reviewer and there's a latest non-overridden verification, we want a fresh draft
-    # (so submitting will override the previous "final" record).
-    latest = get_latest_verification(vid)
+    pred_events = int(float(pred.get("crash_events", 0) or 0))
+    pred_per_min = float(pred.get("crashes_per_min", 0) or 0)
+    duration_sec = float(pred.get("duration_sec", 0) or 0)
 
-    if role == "reviewer":
-        draft = None  # reviewers always start a fresh draft
+    video_path = download_video(youtube_link, str(DOWNLOADS))
+    if not video_path or not os.path.exists(video_path):
+        raise RuntimeError("Failed to download video (yt-dlp/ffmpeg issue).")
 
-    if draft:
-        verification_id = int(draft["id"])
-        try:
-            times = json.loads(draft.get("verified_times_json", "[]") or "[]")
-        except Exception:
-            times = []
-        verified_events = _safe_int(draft.get("verified_crash_events", 0), 0)
-    else:
-        verification_id = create_verification(video_id=vid, verifier=verifier, role=role)
-        times = []
-        verified_events = 0
-
-    # Setup in-memory state
-    _STATE = {
+    sess = {
         "sid": sid,
-        "video_id": vid,
-        "verification_id": verification_id,
-        "video_path": video_path,
         "person": person,
         "scenario": scenario,
         "youtube_link": youtube_link,
-        "pred_crash_events": _safe_int(predicted_crash_events, 0),
-        "pred_crashes_per_min": _safe_float(predicted_crashes_per_min, 0.0),
-        "verified_crash_events": int(verified_events),
-        "verified_times_sec": list(times or []),
-        "duration_sec": 0.0,
-        "done": False,
-        "saved": False,
-        "last_error": None,
-        "verifier": verifier,
-        "role": role,
+        "video_path": video_path,
+        "pred_crash_events": pred_events,
+        "pred_crashes_per_min": pred_per_min,
+        "duration_sec": duration_sec,
+        "verified_crash_events": 0,
+        "verified_crashes_per_min": 0.0,
+        "notes": "",
+        "resume_offset_sec": 0.0,
     }
+    _ACTIVE[sid] = sess
 
-def _persist_draft():
-    """Persist current manual progress to SQLite (draft)."""
-    if init_db is None:
-        return
-    if not _STATE.get("verification_id"):
-        return
-    update_verification_counts(
-        verification_id=int(_STATE["verification_id"]),
-        verified_crash_events=int(_STATE.get("verified_crash_events", 0)),
-        verified_times=list(_STATE.get("verified_times_sec", [])),
-        duration_sec=_STATE.get("duration_sec") or None,
+    db.upsert_session(
+        sid=sid,
+        person=person,
+        scenario=scenario,
+        youtube_link=youtube_link,
+        video_path=video_path,
+        pred_crash_events=pred_events,
+        pred_crashes_per_min=pred_per_min,
+        duration_sec=duration_sec,
+        verified_crash_events=0,
+        verified_crashes_per_min=0.0,
+        status="running",
+        notes="",
+        resume_offset_sec=0.0,
+        sample_fps=float(sample_fps),
+        conf=float(conf),
     )
 
-def mark_crash_now():
-    """
-    Count 1 crash at the current playback time.
-    Also saves to DB draft immediately (so quitting the page doesn't lose progress).
-    """
-    now_sec = video_utils.get_current_time_sec()
-    _STATE["verified_crash_events"] = int(_STATE.get("verified_crash_events", 0)) + 1
-    _STATE.setdefault("verified_times_sec", []).append(float(now_sec))
-    _persist_draft()
+    return sid
 
-def undo_last_crash():
-    times = _STATE.get("verified_times_sec") or []
-    if times:
-        times.pop()
-        _STATE["verified_times_sec"] = times
-        _STATE["verified_crash_events"] = max(0, int(_STATE.get("verified_crash_events", 0)) - 1)
-        _persist_draft()
 
-def save_and_label_later():
-    """
-    Save draft without submitting (user can come back later and resume).
-    """
-    _persist_draft()
-    _STATE["saved"] = True
+def get_session(sid: str) -> Dict[str, Any]:
+    if sid in _ACTIVE:
+        return _ACTIVE[sid]
+    rec = db.get_session(sid)
+    if not rec:
+        raise KeyError("Session not found")
+    _ACTIVE[sid] = dict(rec)
+    return _ACTIVE[sid]
 
-def finish_and_submit():
-    """
-    Submit verification. If reviewer, overrides the latest submitted verification.
-    """
-    if init_db is None:
-        return
 
-    # If reviewer, override current latest verification (history remains)
-    if _STATE.get("role") == "reviewer":
-        latest = get_latest_verification(int(_STATE["video_id"]))
-        if latest and int(latest["id"]) != int(_STATE["verification_id"]):
-            override_verification(int(latest["id"]))
+def stream_video(sid: str):
+    sess = get_session(sid)
 
-    _persist_draft()
-    submit_verification(int(_STATE["verification_id"]))
-    _STATE["done"] = True
-    _STATE["saved"] = True
-
-def get_history() -> List[Dict[str, Any]]:
-    if init_db is None or not _STATE.get("video_id"):
-        return []
-    return list_verification_history(int(_STATE["video_id"]))
-
-# -----------------------------------------------------------------------------
-# Video streaming (OpenCV -> MJPEG)
-# -----------------------------------------------------------------------------
-def generate_crash_video_stream():
-    """
-    Stream the selected video_path as MJPEG with a time overlay.
-    """
-    video_path = _STATE.get("video_path")
-    if not video_path or not os.path.exists(video_path):
-        _STATE["last_error"] = f"Video not found: {video_path}"
-        yield b""
-        return
-
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(sess["video_path"])
     if not cap.isOpened():
-        _STATE["last_error"] = f"OpenCV failed to open: {video_path}"
         yield b""
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    if total_frames and total_frames > 0:
-        _STATE["duration_sec"] = float(total_frames / fps)
-    else:
-        _STATE["duration_sec"] = 0.0
-
-    video_utils.set_video_duration(_STATE["duration_sec"])
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+    dur = (total_frames / fps) if total_frames else 0.0
+    video_utils.set_video_duration(dur)
     video_utils.set_current_time_sec(0.0)
 
     def overlay(frame, tsec):
-        elapsed_str = str(timedelta(seconds=int(tsec)))
-        total_str = str(timedelta(seconds=int(_STATE["duration_sec"] or 0)))
-        cv2.putText(frame, f"{elapsed_str} / {total_str}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
-        # small hint for verifier
-        cv2.putText(frame, f"Verified crashes: {int(_STATE.get('verified_crash_events', 0))}", (10, 65),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2)
+        a = f'{sess["person"]} | {sess["scenario"]}'
+        b = f'Pred={sess["pred_crash_events"]}  Verified={sess["verified_crash_events"]}'
+        cv2.putText(frame, a, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
+        cv2.putText(frame, b, (12, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
         return frame
 
-    for mjpeg_frame in video_utils.read_video_frames(cap, fps, overlay):
-        if not mjpeg_frame:
+    for chunk in video_utils.read_video_frames(cap, fps, overlay):
+        if not chunk:
             time.sleep(0.05)
             continue
-        yield mjpeg_frame
+        yield chunk
 
-    # when video ends, keep a final draft save (so user doesn't lose last few clicks)
-    _persist_draft()
+
+def mark_plus_one(sid: str):
+    sess = get_session(sid)
+    sess["verified_crash_events"] = int(sess.get("verified_crash_events", 0)) + 1
+
+    dur = float(sess.get("duration_sec", 0) or 0)
+    if dur <= 0:
+        dur = max(video_utils.get_current_time_sec(), 1.0)
+
+    per_min = sess["verified_crash_events"] / (dur / 60.0)
+    sess["verified_crashes_per_min"] = float(per_min)
+
+    db.update_counts(sid, int(sess["verified_crash_events"]), float(sess["verified_crashes_per_min"]))
+
+
+def save_label_later(sid: str, notes: str):
+    resume_at = float(video_utils.get_current_time_sec())
+    sess = get_session(sid)
+    sess["notes"] = notes or ""
+    sess["resume_offset_sec"] = resume_at
+    db.update_status_notes(sid, "saved", sess["notes"], resume_at)
+    return {"ok": True, "message": f"Saved ✅ (resume at {resume_at:.1f}s)"}
+
+
+def finish_and_save(sid: str, notes: str):
+    sess = get_session(sid)
+    sess["notes"] = notes or ""
+    db.update_status_notes(sid, "final", sess["notes"], 0.0)
+    return {"ok": True, "message": "Final saved ✅"}
+
+
+def export_excel(out_path: str):
+    import pandas as pd
+    rows = db.list_all()
+    df = pd.DataFrame(rows)
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    df.to_excel(out_path, index=False)
+    return out_path
