@@ -13,3 +13,8 @@ LabelGUI/Uploads/
 analysis_out/
 analysis/videos/
 analysis/weights/*.pt
+
+LabelGUI/db/*.sqlite
+LabelGUI/db/*.sqlite-journal
+LabelGUI/db/*.sqlite-wal
+LabelGUI/db/*.sqlite-shm
