@@ -152,7 +152,7 @@ def generate_video_stream():
     if _current_video_file and os.path.exists(_current_video_file):
         candidate = _current_video_file
     else:
-        # Fallback to newest .mp4 (legacy behavior)
+        # Fallback to newest .mp4
         try:
             files = sorted(
                 [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
@@ -183,11 +183,28 @@ def generate_video_stream():
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
     _video_duration = (total_frames / fps) if total_frames else 0.0
 
     video_utils.set_video_duration(_video_duration)
     video_utils.set_current_time_sec(0.0)
+
+    def draw_validation_overlay(frame, current_time_sec):
+        elapsed_str = str(timedelta(seconds=int(current_time_sec)))
+        total_str = str(timedelta(seconds=int(_video_duration)))
+        cv2.putText(frame, f"{elapsed_str} / {total_str}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        return frame
+
+    print(f"[STREAM] Playing: {candidate} @ fps={fps}")
+    for mjpeg_frame in video_utils.read_video_frames(cap, fps, draw_validation_overlay):
+        if not mjpeg_frame:
+            time.sleep(0.1)
+            continue
+        yield mjpeg_frame
+
+    _video_done = True
+
 
     def draw_validation_overlay(frame, current_time_sec):
         elapsed_str = str(timedelta(seconds=int(current_time_sec)))
