@@ -1,4 +1,8 @@
 from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, flash
+from crash_verify_backend import (
+    list_items_for_table, start_session, stream_video,
+    mark_plus_one, finish_and_save, save_label_later, export_excel
+)
 import os
 import logging
 import pandas as pd  # Excel support (pip install pandas openpyxl)
@@ -6,6 +10,7 @@ import csv
 import uuid
 import sys
 import subprocess
+
 
 from validation_backend import (
     start_validation_thread,
@@ -667,6 +672,73 @@ def training_time_info():
         'current_sec': get_current_time_sec(),
         'total_sec': get_video_duration()
     })
+
+@app.route('/crash_analysis')
+def crash_analysis():
+    items = list_items_for_table()
+    return render_template('crash_analysis.html', items=items)
+
+@app.route('/crash_run', methods=['POST'])
+def crash_run():
+    person = request.form.get("person","").strip()
+    scenario = request.form.get("scenario","").strip()
+    youtube_link = request.form.get("youtube_link","").strip()
+    if not (person and scenario and youtube_link):
+        return "Missing person/scenario/link", 400
+
+    sample_fps = float(request.form.get("sample_fps","2") or 2)
+    conf = float(request.form.get("conf","0.5") or 0.5)
+
+    sid = start_session(person, scenario, youtube_link, sample_fps, conf)
+    return redirect(url_for('crash_verify', sid=sid))
+
+@app.route('/crash_verify/<sid>')
+def crash_verify(sid):
+    # for template display only (counts update via backend)
+    from crash_verify_backend import get_session
+    s = get_session(sid)
+    return render_template(
+        'crash_verify.html',
+        sid=sid,
+        person=s.get("person",""),
+        scenario=s.get("scenario",""),
+        pred_crashes=s.get("pred_crash_events",0),
+        pred_per_min=f'{float(s.get("pred_crashes_per_min",0) or 0):.3f}',
+        ver_crashes=s.get("verified_crash_events",0),
+    )
+
+@app.route('/crash_video_feed/<sid>')
+def crash_video_feed(sid):
+    return Response(stream_video(sid), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/crash_mark/<sid>', methods=['POST'])
+def crash_mark(sid):
+    mark_plus_one(sid)
+    from crash_verify_backend import get_session
+    s = get_session(sid)
+    return jsonify(ok=True, verified_crash_events=int(s.get("verified_crash_events",0)))
+
+@app.route('/crash_save_later/<sid>', methods=['POST'])
+def crash_save_later(sid):
+    data = request.get_json() or {}
+    notes = (data.get("notes") or "").strip()
+    res = save_label_later(sid, notes)
+    return jsonify(res)
+
+@app.route('/crash_finish/<sid>', methods=['POST'])
+def crash_finish(sid):
+    data = request.get_json() or {}
+    notes = (data.get("notes") or "").strip()
+    res = finish_and_save(sid, notes)
+    return jsonify(res)
+
+@app.route('/crash_export_excel')
+def crash_export_excel():
+    out_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "analysis", "results", "crash_verification.xlsx")
+    export_excel(out_path)
+    return redirect(url_for('crash_analysis'))
+
 
 
 if __name__ == '__main__':
