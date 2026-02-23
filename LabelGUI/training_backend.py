@@ -9,6 +9,17 @@ import json
 
 import video_utils
 
+import uuid
+from pathlib import Path
+from db.db_store import DBStore
+
+BASE_DIR = Path(__file__).resolve().parent
+REPO_DIR = BASE_DIR.parent
+DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
+db = DBStore(str(DB_PATH))
+
+_training_sid = None
+
 ###############################################################################
 #                     GLOBALS for the Training Workflow                       #
 ###############################################################################
