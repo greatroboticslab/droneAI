@@ -1,44 +1,79 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Drone Crash Validation</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DroneAI — Validation</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<div class="container">
-    <h1>Validation Marking</h1>
 
-    <!-- Excel importer entry point -->
-    <p style="margin-bottom: 20px;">
-      Or load videos from an Excel sheet:
-      <a href="/import_excel">
-        <button type="button">📁 Import Excel & Pick Entry</button>
-      </a>
-    </p>
-
-    <form method="POST" action="/validation_index">
-        <label for="youtube_link">YouTube Link:</label>
-        <input type="text" id="youtube_link" name="youtube_link" required>
-
-        <label for="folder_name">Folder Name:</label>
-        <input type="text" id="folder_name" name="folder_name" required>
-
-        <br><br>
-        <input type="checkbox" id="delete_original" name="delete_original">
-        <label for="delete_original">Delete original downloaded video after processing</label>
-        <br><br>
-
-        <button type="submit">Start Processing</button>
-    </form>
-
-    <br><br>
-    <a href="/">
-        <button type="button">Back to Home</button>
-    </a>
-
-    <div class="page-footer">
-        Developed by Haider Baig 2025
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">Validation Marking</div>
     </div>
-</div>
+
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Home</a>
+      <a class="btn btn--ghost" href="/db_tools">DB Tools</a>
+      <a class="btn btn--ghost" href="/crash_analysis">Crash Analysis</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <div class="grid grid--2">
+
+    <!-- Excel flow -->
+    <section class="card">
+      <h2>Excel Workflow (recommended)</h2>
+      <p class="muted">
+        Import an Excel sheet, pick an entry, then label events. This is best for team collaboration.
+      </p>
+
+      <div class="actions actions--big">
+        <a class="btn btn--primary" href="/import_excel">📁 Import Excel & Pick Entry</a>
+      </div>
+
+      <p class="muted" style="margin-top:12px;">
+        Team rule: import the latest DB first (DB Tools) before labeling new entries.
+      </p>
+    </section>
+
+    <!-- Manual flow -->
+    <section class="card">
+      <h2>Manual Link</h2>
+      <p class="muted">Paste a YouTube link and create a new validation session folder.</p>
+
+      <form method="POST" action="/validation_index">
+        <label for="youtube_link">YouTube Link</label>
+        <input type="text" id="youtube_link" name="youtube_link" placeholder="https://www.youtube.com/watch?v=..." required>
+
+        <label for="folder_name">Folder Name</label>
+        <input type="text" id="folder_name" name="folder_name" placeholder="Example: Session_01" required>
+
+        <label style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+          <input type="checkbox" id="delete_original" name="delete_original" style="width:auto;">
+          Delete original downloaded video after processing
+        </label>
+
+        <div class="actions actions--big">
+          <button class="btn btn--primary" type="submit">Start Validation</button>
+          <a class="btn btn--secondary" href="/">Back</a>
+        </div>
+      </form>
+    </section>
+
+  </div>
+
+  <div class="card" style="margin-top:18px;">
+    <p class="muted" style="margin:0;">
+      Developed by Haider Baig 2025
+    </p>
+  </div>
+</main>
+
 </body>
 </html>
