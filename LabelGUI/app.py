@@ -92,7 +92,7 @@ def validation_index():
             folder_name=folder_name,
             delete_original=delete_original,
         )
-        redirect(url_for("validation_view_stream_page"))
+        return redirect(url_for("validation_view_stream", source="manual"))
         
     return render_template("validation_index.html")
 
@@ -411,11 +411,6 @@ def training_video_feed():
         generate_training_video_stream(auto_finalize=True),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
-
-@app.route("/validation_view_stream")
-def validation_view_stream():
-    source = request.args.get("source", "manual")
-    return render_template("validation_results.html", source=source)
 
 
 @app.route("/training_check_status")
