@@ -5,11 +5,22 @@ import yt_dlp
 import threading
 import time
 import json
+import uuid
 from datetime import timedelta, datetime
+from pathlib import Path
 
 import pandas as pd  # pip install pandas openpyxl
-
 import video_utils
+
+from db.db_store import DBStore
+
+# -----------------------
+# Paths / DB
+# -----------------------
+BASE_DIR = Path(__file__).resolve().parent      # LabelGUI/
+REPO_DIR = BASE_DIR.parent                     # DroneAI/
+DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
+db = DBStore(str(DB_PATH))
 
 # -----------------------
 # Globals / session state
@@ -21,6 +32,9 @@ _delete_original = False
 _event_times = []          # list of tuples: (idx, event_type, time_sec)
 _video_duration = 0.0
 _current_video_file = None
+_validation_sid = None
+_target_folder = None
+_last_youtube_link = ""
 
 _extraction_in_progress = False
 _extraction_current = 0
@@ -32,11 +46,9 @@ _extraction_total = 0
 # -----------------------
 def _normalize_youtube_url(url: str) -> str:
     url = (url or "").strip().strip('"').strip("'")
-    # youtu.be/<id> -> https://www.youtube.com/watch?v=<id>
     m = re.match(r"^https?://youtu\.be/([A-Za-z0-9_-]{8,})", url)
     if m:
         return f"https://www.youtube.com/watch?v={m.group(1)}"
-    # shorts -> watch
     m = re.match(r"^https?://(www\.)?youtube\.com/shorts/([A-Za-z0-9_-]{8,})", url)
     if m:
         return f"https://www.youtube.com/watch?v={m.group(2)}"
@@ -61,16 +73,17 @@ def start_validation_thread(
     """
     global _processing_thread, _video_done, _log_file_path
     global _delete_original, _event_times, _video_duration, _current_video_file
+    global _validation_sid, _target_folder, _last_youtube_link
 
     # Stop any prior session cleanly
     if _processing_thread and _processing_thread.is_alive():
         _video_done = True
-        # don't join forever; just allow it to exit
 
     _video_done = False
     _event_times = []
     _video_duration = 0.0
     _delete_original = bool(delete_original)
+    _last_youtube_link = (youtube_link or "").strip()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, "YouTubeDownloads")
@@ -95,7 +108,23 @@ def start_validation_thread(
         target_folder = get_unique_folder_name(results_dir, folder_name)
         os.makedirs(target_folder, exist_ok=True)
 
+    _target_folder = target_folder
     _log_file_path = os.path.join(target_folder, "event_log.txt")
+
+    # Create DB session
+    _validation_sid = str(uuid.uuid4())
+
+    db.upsert_validation_session(
+        sid=_validation_sid,
+        person_name=(person_name or ""),
+        scenario_base=(scenario_base or ""),
+        youtube_link=_last_youtube_link,
+        folder_path=os.path.relpath(target_folder, start=str(REPO_DIR)),
+        delete_original=1 if _delete_original else 0,
+        status="running",
+        duration_sec=0.0,
+        events_count=0,
+    )
 
     # Download
     downloaded_filepath = download_video(youtube_link, youtube_downloads_dir)
@@ -103,9 +132,18 @@ def start_validation_thread(
 
     if not downloaded_filepath:
         _video_done = True
+        db.finalize_validation_session(_validation_sid, 0.0, 0, status="failed")
         with open(_log_file_path, "w", encoding="utf-8") as f:
             f.write("Download failed.\n")
         return
+
+    # Update DB with video_path now that we have it
+    db.upsert_validation_session(
+        sid=_validation_sid,
+        youtube_link=_last_youtube_link,
+        video_path=os.path.relpath(downloaded_filepath, start=str(REPO_DIR)),
+        status="running",
+    )
 
     def video_thread():
         nonlocal downloaded_filepath, target_folder, youtube_link, base_dir
@@ -148,6 +186,14 @@ def start_validation_thread(
         except Exception:
             pass
 
+        # Finalize DB session
+        db.finalize_validation_session(
+            _validation_sid,
+            duration_sec=float(_video_duration or 0.0),
+            events_count=int(len(_event_times)),
+            status="final"
+        )
+
         finalize_video(target_folder)
 
     _processing_thread = threading.Thread(target=video_thread, daemon=True)
@@ -157,18 +203,16 @@ def start_validation_thread(
 def generate_video_stream():
     """
     Streams the current downloaded video via MJPEG frames.
-    IMPORTANT: this function must be a SINGLE loop (your old file duplicated it).
+    Single loop only (no duplicates).
     """
     global _video_done, _video_duration, _current_video_file
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, "YouTubeDownloads")
 
-    # Prefer the file from this session
     if _current_video_file and os.path.exists(_current_video_file):
         candidate = _current_video_file
     else:
-        # Fallback: newest mp4 in folder
         try:
             files = sorted(
                 [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
@@ -183,7 +227,6 @@ def generate_video_stream():
                 break
 
     if not candidate:
-        # nothing yet (download still happening)
         while not _video_done:
             time.sleep(0.2)
             yield b""
@@ -217,7 +260,6 @@ def generate_video_stream():
         )
         return frame
 
-    # Single stream loop
     for mjpeg_frame in video_utils.read_video_frames(cap, fps, draw_overlay):
         if not mjpeg_frame:
             time.sleep(0.05)
@@ -228,10 +270,18 @@ def generate_video_stream():
 
 
 def mark_event_now(event_type: str):
-    global _event_times
+    """
+    Called by /mark_event endpoint.
+    Logs into memory AND DB.
+    """
+    global _event_times, _validation_sid
+
     idx = len(_event_times) + 1
     current_time_sec = video_utils.get_current_time_sec()
     _event_times.append((idx, event_type, current_time_sec))
+
+    if _validation_sid:
+        db.insert_validation_event(_validation_sid, idx, event_type, current_time_sec)
 
 
 def is_video_done():
@@ -239,13 +289,11 @@ def is_video_done():
 
 
 def finalize_video(target_folder):
-    # for compatibility; extraction happens in worker thread after _video_done flips
     global _video_done
     _video_done = True
 
 
 def get_crash_count():
-    # back-compat name
     return len(_event_times)
 
 
@@ -266,7 +314,6 @@ def skip_video(offset_seconds: float):
 
 
 def get_logged_events():
-    # Light-weight preview; exact windows are in event_log.txt
     results = []
     for (idx, event_type, ctime) in _event_times:
         results.append({
@@ -282,10 +329,6 @@ def get_logged_events():
 # Extraction (NO DUPLICATES)
 # -----------------------
 def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint):
-    """
-    Frame-based clips: 15 frames before + 15 after.
-    Also writes an Excel file with one row per labeled event.
-    """
     global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
     if not event_times_list:
@@ -361,7 +404,6 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
 
     _extraction_in_progress = False
 
-    # Write Excel after all events
     if excel_rows:
         base_title = os.path.splitext(os.path.basename(video_path))[0]
         excel_name = f"{base_title}_labels.xlsx"
@@ -369,7 +411,6 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
         try:
             df = pd.DataFrame(excel_rows)
             df.to_excel(excel_path, index=False)
-            print(f"[multiple_pass_extract] Wrote Excel labels to: {excel_path}")
         except Exception as e:
             print("[multiple_pass_extract] Failed to write Excel file:", e)
 
@@ -394,21 +435,13 @@ def get_unique_folder_name(parent_dir, base_name):
 
 
 # -----------------------
-# Download (clean, no unreachable code)
+# Download (clean)
 # -----------------------
 def download_video(youtube_link, download_folder):
-    """
-    Download to a unique filename (title + id), return actual filepath.
-    Strategy order:
-      1) bv*+ba (merged to mp4)
-      2) best[ext=mp4]
-      3) 18 (360p mp4 muxed)
-      4) best
-    """
     os.makedirs(download_folder, exist_ok=True)
     youtube_link = _normalize_youtube_url(youtube_link)
 
-    # NOTE: hard-coded path kept from your version; recommend moving to config/env later
+    # NOTE: keep your existing path (we can move this later)
     FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
 
     base_opts = {
@@ -471,7 +504,6 @@ def download_video(youtube_link, download_folder):
                 out_paths = _resolve_output_paths(ydl, info)
                 for p in out_paths:
                     if p.lower().endswith((".mp4", ".mkv", ".webm")) and os.path.exists(p):
-                        print(f"[download_video] succeeded with '{fmt}': {p}")
                         return p
         except Exception as e:
             print(f"[download_video] attempt with '{fmt}' failed:", e)
@@ -482,7 +514,6 @@ def download_video(youtube_link, download_folder):
         if p:
             return p
 
-    print("[download_video] failed to download for:", youtube_link)
     return None
 
 
@@ -521,7 +552,6 @@ def _count_clips(folder):
 
 
 def update_progress_record(person_name, youtube_link, scenario_base, target_folder, events_count):
-    """Update progress.json after a session finishes."""
     if not person_name or not scenario_base:
         return
 
@@ -531,11 +561,7 @@ def update_progress_record(person_name, youtube_link, scenario_base, target_fold
     if "people" not in data:
         data["people"] = {}
     if prefix not in data["people"]:
-        data["people"][prefix] = {
-            "full_names": list({person_name}),
-            "sessions": [],
-            "total_events": 0,
-        }
+        data["people"][prefix] = {"full_names": list({person_name}), "sessions": [], "total_events": 0}
     else:
         names = set(data["people"][prefix].get("full_names", []))
         names.add(person_name)
@@ -557,17 +583,8 @@ def update_progress_record(person_name, youtube_link, scenario_base, target_fold
 
 
 def get_progress_summary():
-    """Lightweight summary for UI: { prefix: {sessions:int, total_events:int} }"""
     data = _load_progress()
     out = {}
     for prefix, rec in data.get("people", {}).items():
-        out[prefix] = {
-            "sessions": len(rec.get("sessions", [])),
-            "total_events": int(rec.get("total_events", 0)),
-        }
+        out[prefix] = {"sessions": len(rec.get("sessions", [])), "total_events": int(rec.get("total_events", 0))}
     return out
-
-
-def get_full_progress():
-    """Return full progress.json."""
-    return _load_progress()
