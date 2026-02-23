@@ -65,6 +65,23 @@ def start_training_session(
     global _capture_mode, _custom_fps, _label_chunks, _last_frame_index
     global _delete_metadata_after_final
 
+    global _training_sid
+
+    _training_sid = str(uuid.uuid4())
+
+    db.upsert_training_session(
+    sid=_training_sid,
+    user_name=user_name,
+    youtube_link=youtube_link,
+    video_path=str(_training_video_path or ""),
+    metadata_path=str(_training_metadata_path or ""),
+    capture_mode=str(capture_mode),
+    custom_fps=float(custom_fps),
+    delete_original=1 if delete_original else 0,
+    keep_metadata=1 if keep_metadata else 0,
+    status="running",
+)
+
     if _training_thread and _training_thread.is_alive():
         return
 
