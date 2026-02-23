@@ -486,6 +486,7 @@ def save_metadata_csv(path):
     rows.append(["capture_mode", _capture_mode])
     rows.append(["custom_fps", str(_custom_fps)])
     rows.append(["active_label", _active_label or ""])
+    rows.append(["session_id", _training_sid or ""])
 
     label_str_parts = []
     for (lbl, col) in _labels_and_colors:
