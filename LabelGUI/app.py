@@ -1,7 +1,12 @@
 from flask import Flask, render_template, request, Response, redirect, url_for, jsonify
 import os
 import logging
-import pandas as pd  # pip install pandas openpyxl
+import pandas as pd
+import io
+import zipfile
+from datetime import datetime
+from functools import wraps
+from flask import send_file, session
 
 # ===================== VALIDATION BACKEND =====================
 from validation_backend import (
@@ -43,6 +48,21 @@ from crash_verify_backend import (
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = "droneai-secret-key"
+
+ADMIN_USER = os.environ.get("DRONEAI_ADMIN_USER", "admin")
+ADMIN_PASS = os.environ.get("DRONEAI_ADMIN_PASS", "admin123")
+
+def login_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("is_admin"):
+            return redirect(url_for("login"))
+        return fn(*args, **kwargs)
+    return wrapper
+
+def _db_path():
+    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(repo_dir, "db", "droneai.sqlite")
 
 # ============ In-memory cache of Excel entries ============
 EXCEL_ENTRIES = []       # [{"id": 1, "person": "...", "link": "..."}]
@@ -455,6 +475,111 @@ def training_get_status_api():
 def training_time_info():
     from video_utils import get_current_time_sec, get_video_duration
     return jsonify({"current_sec": get_current_time_sec(), "total_sec": get_video_duration()})
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        u = request.form.get("username", "")
+        p = request.form.get("password", "")
+        if u == ADMIN_USER and p == ADMIN_PASS:
+            session["is_admin"] = True
+            return redirect(url_for("db_tools"))
+        return render_template("login.html", error="Invalid username/password.")
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("home_page"))
+
+@app.route("/db_tools")
+@login_required
+def db_tools():
+    return render_template("db_tools.html")
+
+@app.route("/db_download")
+@login_required
+def db_download():
+    path = _db_path()
+    if not os.path.exists(path):
+        return "DB file not found.", 404
+    return send_file(path, as_attachment=True, download_name="droneai.sqlite")
+
+@app.route("/db_upload", methods=["POST"])
+@login_required
+def db_upload():
+    f = request.files.get("db_file")
+    if not f or f.filename == "":
+        return render_template("db_tools.html", error="Please choose a .sqlite file to upload.")
+
+    path = _db_path()
+    db_dir = os.path.dirname(path)
+    os.makedirs(db_dir, exist_ok=True)
+
+    # Backup current DB first
+    if os.path.exists(path):
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = os.path.join(db_dir, f"droneai_backup_{stamp}.sqlite")
+        try:
+            with open(path, "rb") as src, open(backup, "wb") as dst:
+                dst.write(src.read())
+        except Exception as e:
+            return render_template("db_tools.html", error=f"Backup failed: {e}")
+
+    # Replace DB
+    try:
+        f.save(path)
+    except Exception as e:
+        return render_template("db_tools.html", error=f"Upload failed: {e}")
+
+    return render_template("db_tools.html", message="Imported DB successfully. You can now continue labeling using the imported labels.")
+
+@app.route("/db_export_excel")
+@login_required
+def db_export_excel():
+    """
+    Export all DB tables to one Excel file (basic, useful for grading/reporting).
+    """
+    import sqlite3
+    import pandas as pd
+
+    path = _db_path()
+    if not os.path.exists(path):
+        return "DB file not found.", 404
+
+    conn = sqlite3.connect(path)
+
+    # read tables safely
+    def read_table(name):
+        try:
+            return pd.read_sql_query(f"SELECT * FROM {name}", conn)
+        except Exception:
+            return None
+
+    tables = [
+        "verifications",
+        "validation_sessions",
+        "validation_events",
+        "training_sessions",
+        "training_chunks",
+    ]
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for t in tables:
+            df = read_table(t)
+            if df is not None:
+                df.to_excel(writer, sheet_name=t[:31], index=False)
+
+    conn.close()
+    output.seek(0)
+
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name="droneai_export.xlsx",
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 if __name__ == "__main__":
