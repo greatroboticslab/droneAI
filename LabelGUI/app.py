@@ -93,7 +93,7 @@ def validation_index():
             delete_original=delete_original,
         )
         return redirect(url_for("validation_view_stream"))
-
+        
     return render_template("validation_index.html")
 
 
