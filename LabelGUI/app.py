@@ -92,7 +92,7 @@ def validation_index():
             folder_name=folder_name,
             delete_original=delete_original,
         )
-        return redirect(url_for("validation_view_stream"))
+        redirect(url_for("validation_view_stream_page"))
         
     return render_template("validation_index.html")
 
@@ -227,7 +227,7 @@ def start_from_excel():
         person_name=match["person"],
         scenario_base=scenario_base,
     )
-    return redirect(url_for("validation_view_stream", source="excel"))
+    return redirect(url_for("validation_view_stream_page", source="excel"))
 
 
 
