@@ -79,7 +79,8 @@ def validation_index():
 
 @app.route("/validation_view_stream")
 def validation_view_stream():
-    return render_template("validation_results.html")
+    source = request.args.get("source", "manual")
+    return render_template("validation_results.html", source=source)
 
 
 @app.route("/validation_video_feed")
