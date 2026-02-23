@@ -7,8 +7,6 @@ import csv
 from datetime import timedelta
 import json
 
-import video_utils
-
 import uuid
 from pathlib import Path
 from db.db_store import DBStore
@@ -19,6 +17,8 @@ DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
 db = DBStore(str(DB_PATH))
 
 _training_sid = None
+
+import video_utils
 
 ###############################################################################
 #                     GLOBALS for the Training Workflow                       #
@@ -64,23 +64,7 @@ def start_training_session(
     global _delete_original, _user_name, _labels_and_colors, _active_label
     global _capture_mode, _custom_fps, _label_chunks, _last_frame_index
     global _delete_metadata_after_final
-
     global _training_sid
-
-    _training_sid = str(uuid.uuid4())
-
-    db.upsert_training_session(
-    sid=_training_sid,
-    user_name=user_name,
-    youtube_link=youtube_link,
-    video_path=str(_training_video_path or ""),
-    metadata_path=str(_training_metadata_path or ""),
-    capture_mode=str(capture_mode),
-    custom_fps=float(custom_fps),
-    delete_original=1 if delete_original else 0,
-    keep_metadata=1 if keep_metadata else 0,
-    status="running",
-)
 
     if _training_thread and _training_thread.is_alive():
         return
@@ -114,11 +98,31 @@ def start_training_session(
         _training_done = True
         return
 
-    def background_thread():
-        while not _training_done:
-            time.sleep(0.5)
+    # ---------------- DB: create a session ----------------
+    _training_sid = str(uuid.uuid4())
+    db.upsert_training_session(
+        sid=_training_sid,
+        user_name=_user_name,
+        youtube_link=youtube_link,
+        video_path=_training_video_path or "",
+        metadata_path=_training_metadata_path or "",
+        capture_mode=_capture_mode,
+        custom_fps=float(_custom_fps),
+        delete_original=1 if _delete_original else 0,
+        keep_metadata=0 if _delete_metadata_after_final else 1,
+        status="running",
+    )
 
-    _training_thread = threading.Thread(target=background_thread, daemon=True)
+    def training_thread_fn():
+        # Save metadata initially so Resume works even if user leaves early
+        save_metadata_csv(_training_metadata_path)
+
+        # Training ends when generate_training_video_stream hits end of video
+        # finalize_training_session will be called by generate_training_video_stream auto-finalize
+        # or by the user via Take a Break route
+        return
+
+    _training_thread = threading.Thread(target=training_thread_fn, daemon=True)
     _training_thread.start()
 
 
@@ -126,6 +130,7 @@ def resume_training_session(metadata_file):
     global _training_done, _training_video_path, _training_metadata_path
     global _label_chunks, _active_label, _user_name, _capture_mode, _custom_fps
     global _labels_and_colors, _last_frame_index, _delete_metadata_after_final
+    global _training_sid
 
     _training_done = False
     _training_metadata_path = metadata_file
@@ -144,6 +149,8 @@ def resume_training_session(metadata_file):
                 key, val = row[0], row[1]
                 if key == "user_name":
                     _user_name = val
+                elif key == "session_id":
+                    _training_sid = val
                 elif key == "video_path":
                     _training_video_path = val
                 elif key == "capture_mode":
@@ -165,160 +172,153 @@ def resume_training_session(metadata_file):
                     _delete_metadata_after_final = (val.strip() == "1")
                 elif key == "----":
                     mode = "chunks"
-            elif mode == "chunks":
-                c_start, c_end, c_label = row
-                _label_chunks.append({
-                    "start_frame": int(c_start),
-                    "end_frame": int(c_end),
-                    "label": c_label
-                })
+            else:
+                # chunk rows
+                if len(row) >= 3:
+                    try:
+                        s = int(row[0])
+                        e = int(row[1])
+                        lbl = row[2]
+                        _label_chunks.append({"start_frame": s, "end_frame": e, "label": lbl})
+                    except Exception:
+                        pass
 
-    from video_utils import set_pause_flag
-    set_pause_flag(False)
-
-    def background_thread():
-        while not _training_done:
-            time.sleep(0.5)
-
-    t = threading.Thread(target=background_thread, daemon=True)
-    t.start()
+    # Mark session running in DB when resuming
+    if _training_sid:
+        db.upsert_training_session(
+            sid=_training_sid,
+            user_name=_user_name,
+            video_path=_training_video_path or "",
+            metadata_path=_training_metadata_path or "",
+            capture_mode=_capture_mode,
+            custom_fps=float(_custom_fps),
+            delete_original=1 if _delete_original else 0,
+            keep_metadata=0 if _delete_metadata_after_final else 1,
+            status="running",
+        )
 
 
 def generate_training_preview_stream():
-    global _training_video_path, _training_done
-
+    # Quick preview mode: show the video from the beginning
     if not _training_video_path or not os.path.exists(_training_video_path):
-        return b''
+        return
 
     cap = cv2.VideoCapture(_training_video_path)
     if not cap.isOpened():
-        return b''
+        return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    preview_duration = 10.0
 
-    def overlay_preview(frame, current_time_sec):
-        h, w, _ = frame.shape
-        cv2.putText(
-            frame,
-            "Preview Mode (10s)",
-            (10, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.5,
-            (0, 255, 255),
-            3
-        )
-        return frame
+    # just show first ~3 seconds
+    max_frames = int(fps * 3)
+    frame_count = 0
 
-    start_time = time.time()
-    for mjpeg_frame in video_utils.read_video_frames(cap, fps, frame_handler_callback=overlay_preview):
-        if not mjpeg_frame:
-            time.sleep(0.1)
-            continue
-
-        elapsed = time.time() - start_time
-        if elapsed > preview_duration:
+    while frame_count < max_frames:
+        ret, frame = cap.read()
+        if not ret:
             break
-
-        yield mjpeg_frame
+        ret2, buffer = cv2.imencode('.jpg', frame)
+        if not ret2:
+            continue
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        frame_count += 1
+        time.sleep(1 / fps)
 
     cap.release()
 
 
 def generate_training_video_stream(auto_finalize=True):
-    global _training_done, _active_label, _last_frame_index
+    global _training_done
+    global _last_frame_index
 
     if not _training_video_path or not os.path.exists(_training_video_path):
         _training_done = True
-        while not _training_done:
-            time.sleep(0.1)
-        return b''
+        return
 
     cap = cv2.VideoCapture(_training_video_path)
     if not cap.isOpened():
         _training_done = True
-        return b''
+        return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    duration_sec = total_frames / fps if total_frames > 0 else 0.0
+    total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+    duration_sec = (total_frames / fps) if total_frames else 0.0
+
     video_utils.set_video_duration(duration_sec)
 
+    # Seek to last_frame_index if resuming
     if _last_frame_index > 0:
         cap.set(cv2.CAP_PROP_POS_FRAMES, _last_frame_index)
-        video_utils.set_current_time_sec(_last_frame_index / fps)
-    else:
-        video_utils.set_current_time_sec(0.0)
 
-    def overlay_label(frame, current_time_sec):
-        label_color = (255, 255, 255)
-        if _active_label:
-            for (lbl, hx) in _labels_and_colors:
-                if lbl == _active_label:
-                    rgb = hex_to_bgr(hx)
-                    label_color = rgb
-                    break
-        h, w, _ = frame.shape
-        cv2.rectangle(frame, (0, 0), (w, h), label_color, 10)
-        overlay_text = f"Label: {_active_label or 'None'}"
-        cv2.putText(
-            frame,
-            overlay_text,
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (255, 255, 255),
-            2
-        )
-        return frame
-
-    for mjpeg_frame in video_utils.read_video_frames(cap, fps, frame_handler_callback=overlay_label):
-        if not mjpeg_frame:
+    while True:
+        if video_utils.is_paused():
             time.sleep(0.1)
             continue
 
-        current_frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+        skip = video_utils.consume_skip_request()
+        if skip != 0:
+            cur = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+            newpos = max(0, cur + int(skip * fps))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, newpos)
 
-        if _active_label and (current_frame_idx - 1) >= _last_frame_index:
-            add_or_update_chunk(_active_label, _last_frame_index, current_frame_idx - 1)
-            _last_frame_index = current_frame_idx
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-        yield mjpeg_frame
+        frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+        _last_frame_index = frame_idx
+        video_utils.set_current_time_sec(frame_idx / fps)
 
-    if not _training_done:
-        _training_done = True
-        if auto_finalize:
-            finalize_training_session(do_final_pass=True)
+        # show overlay: time and active label
+        overlay = frame.copy()
+        elapsed = video_utils.format_time(frame_idx / fps)
+        total = video_utils.format_time(duration_sec)
+        label_txt = _active_label or "(no label)"
+        cv2.putText(overlay, f"{elapsed} / {total}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+        cv2.putText(overlay, f"Label: {label_txt}", (10, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
+
+        ret2, buffer = cv2.imencode('.jpg', overlay)
+        if not ret2:
+            continue
+        frame_bytes = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+        time.sleep(1 / fps)
+
+    cap.release()
+
+    if auto_finalize:
+        finalize_training_session(do_final_pass=True)
 
 
 ###############################################################################
-#                            CHUNK MANAGEMENT                                 #
+#                       CHUNKS + FINALIZATION LOGIC                           #
 ###############################################################################
-def add_or_update_chunk(label, start_frame, end_frame):
-    if not _label_chunks:
-        _label_chunks.append({
-            "start_frame": start_frame,
-            "end_frame": end_frame,
-            "label": label
-        })
-        return
+def add_or_update_chunk(start_frame, end_frame, label):
+    global _label_chunks
 
-    last_chunk = _label_chunks[-1]
-    if last_chunk["label"] == label and last_chunk["end_frame"] + 1 >= start_frame:
-        last_chunk["end_frame"] = end_frame
-    else:
-        _label_chunks.append({
-            "start_frame": start_frame,
-            "end_frame": end_frame,
-            "label": label
-        })
+    if start_frame > end_frame:
+        start_frame, end_frame = end_frame, start_frame
+
+    # try merge with last chunk if same label and adjacent/overlapping
+    if _label_chunks:
+        last = _label_chunks[-1]
+        if last["label"] == label and start_frame <= last["end_frame"] + 1:
+            last["end_frame"] = max(last["end_frame"], end_frame)
+            return
+
+    _label_chunks.append({"start_frame": start_frame, "end_frame": end_frame, "label": label})
 
 
-###############################################################################
-#               FINAL PASS: Write Labeled Frames to Disk                      #
-###############################################################################
 def finalize_training_session(do_final_pass=True):
     global _training_done, _final_pass_in_progress
+    global _training_sid
     global _final_pass_current, _final_pass_total, _saved_frames_count
 
     print(f"\nDEBUG: finalize_training_session called with do_final_pass={do_final_pass}")
@@ -330,6 +330,18 @@ def finalize_training_session(do_final_pass=True):
 
     if not do_final_pass:
         print("DEBUG: do_final_pass=False -> skipping image writes.")
+        if _training_sid:
+            db.upsert_training_session(
+                sid=_training_sid,
+                user_name=_user_name,
+                video_path=_training_video_path or "",
+                metadata_path=_training_metadata_path or "",
+                capture_mode=_capture_mode,
+                custom_fps=float(_custom_fps),
+                delete_original=1 if _delete_original else 0,
+                keep_metadata=0 if _delete_metadata_after_final else 1,
+                status="paused",
+            )
         return
 
     _final_pass_in_progress = True
@@ -378,103 +390,104 @@ def finalize_training_session(do_final_pass=True):
         os.remove(_training_metadata_path)
         print("DEBUG: metadata file removed -> final pass complete")
 
+    # Finalize DB session
+    if _training_sid:
+        db.replace_training_chunks(_training_sid, _label_chunks)
+        db.upsert_training_session(
+            sid=_training_sid,
+            user_name=_user_name,
+            video_path=_training_video_path or "",
+            metadata_path=_training_metadata_path or "",
+            capture_mode=_capture_mode,
+            custom_fps=float(_custom_fps),
+            delete_original=1 if _delete_original else 0,
+            keep_metadata=0 if _delete_metadata_after_final else 1,
+            status="final",
+        )
+
 
 def save_frame_to_label_folder_debug(frame, label, frame_idx, training_dir):
-    global _user_name, _saved_frames_count
+    safe_label = make_safe_name(label)
+    label_dir = os.path.join(training_dir, safe_label)
+    os.makedirs(label_dir, exist_ok=True)
 
-    label_folder = os.path.join(training_dir, label)
-    os.makedirs(label_folder, exist_ok=True)
+    if safe_label not in _saved_frames_count:
+        _saved_frames_count[safe_label] = 0
+    _saved_frames_count[safe_label] += 1
+    seq = _saved_frames_count[safe_label]
 
-    safe_user_name = make_safe_name(_user_name)
-    base_filename = f"{safe_user_name}_{label}_{frame_idx}.png"
-    final_filename = find_non_collision_filename(label_folder, base_filename)
-    out_path = os.path.join(label_folder, final_filename)
-    success = cv2.imwrite(out_path, frame)
+    filename = f"{safe_label}_{seq:06d}.jpg"
+    out_path = os.path.join(label_dir, filename)
 
-    if success:
-        if label not in _saved_frames_count:
-            _saved_frames_count[label] = 0
-        _saved_frames_count[label] += 1
-    else:
-        print(f"DEBUG: cv2.imwrite failed for {out_path}")
-
-    return success
+    try:
+        cv2.imwrite(out_path, frame)
+        return True
+    except Exception as e:
+        print("DEBUG: failed to write frame:", e)
+        return False
 
 
-def find_label_for_frame(frame_idx: int):
-    for chunk in _label_chunks:
-        if chunk["start_frame"] <= frame_idx <= chunk["end_frame"]:
-            return chunk["label"]
+def find_label_for_frame(frame_idx):
+    for c in _label_chunks:
+        if c["start_frame"] <= frame_idx <= c["end_frame"]:
+            return c["label"]
     return None
 
 
-def should_save_this_frame(frame_idx: int, fps: float):
-    global _capture_mode, _custom_fps
-    if _capture_mode == "all":
-        return True
-    elif _capture_mode == "10fps":
-        divisor = int(round(fps / 10.0))
-        if divisor < 1:
-            divisor = 1
-        return (frame_idx % divisor) == 0
-    elif _capture_mode == "customfps":
-        if _custom_fps <= 0:
-            return False
-        divisor = int(round(fps / _custom_fps))
-        if divisor < 1:
-            divisor = 1
-        return (frame_idx % divisor) == 0
-    else:
-        # fallback to 10fps
-        divisor = int(round(fps / 10.0))
-        if divisor < 1:
-            divisor = 1
-        return (frame_idx % divisor) == 0
+def should_save_this_frame(frame_idx, fps):
+    if _capture_mode == "10fps":
+        return (frame_idx % max(1, int(fps / 10))) == 0
+    if _capture_mode == "1fps":
+        return (frame_idx % max(1, int(fps))) == 0
+    if _capture_mode == "custom":
+        # custom_fps frames per second
+        step = max(1, int(fps / max(0.01, float(_custom_fps))))
+        return (frame_idx % step) == 0
+    return True
 
 
-###############################################################################
-#                            SET ACTIVE LABEL                                 #
-###############################################################################
 def set_current_label(label_name):
     global _active_label
-    print(f"DEBUG: set_current_label -> {label_name}")
+
+    # close previous chunk if open-ended tracking is used somewhere else
     _active_label = label_name
 
 
 ###############################################################################
-#                                GET STATUS                                   #
+#                         STATUS / PROGRESS APIs                              #
 ###############################################################################
 def is_training_done():
     return _training_done
 
 
 def get_training_status():
-    total_frames = 0
-    for c in _label_chunks:
-        total_frames += (c["end_frame"] - c["start_frame"] + 1)
-
-    total_saved = sum(_saved_frames_count.values())
-
     return {
-        "user_name": _user_name,
-        "total_chunks": len(_label_chunks),
-        "total_labeled_frames": total_frames,
-        "label_chunks": _label_chunks,
-        "saved_frames_per_label": _saved_frames_count,
-        "saved_frames_total": total_saved
-    }
-
-
-def get_training_progress():
-    return {
+        "training_done": _training_done,
         "final_pass_in_progress": _final_pass_in_progress,
         "final_pass_current": _final_pass_current,
         "final_pass_total": _final_pass_total
     }
 
 
+def get_training_progress():
+    if not _training_video_path or not os.path.exists(_training_video_path):
+        return {"progress": 0.0}
+
+    cap = cv2.VideoCapture(_training_video_path)
+    if not cap.isOpened():
+        return {"progress": 0.0}
+
+    total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+    cap.release()
+
+    if total <= 0:
+        return {"progress": 0.0}
+
+    return {"progress": float(_last_frame_index) / float(total)}
+
+
 ###############################################################################
-#                           METADATA CSV SAVE/LOAD                            #
+#                            METADATA SAVE/LOAD                               #
 ###############################################################################
 def save_metadata_csv(path):
     if not path:
@@ -482,11 +495,11 @@ def save_metadata_csv(path):
     print(f"DEBUG: save_metadata_csv -> {path}")
     rows = []
     rows.append(["user_name", _user_name])
+    rows.append(["session_id", _training_sid or ""])
     rows.append(["video_path", _training_video_path or ""])
     rows.append(["capture_mode", _capture_mode])
     rows.append(["custom_fps", str(_custom_fps)])
     rows.append(["active_label", _active_label or ""])
-    rows.append(["session_id", _training_sid or ""])
 
     label_str_parts = []
     for (lbl, col) in _labels_and_colors:
@@ -511,108 +524,104 @@ def save_metadata_csv(path):
 ###############################################################################
 #                          LABEL GROUP LOAD/SAVE                              #
 ###############################################################################
-def load_label_group_file(path):
-    """
-    Reads a .lblgroup JSON file with structure:
-    {
-      "group_name": "MyDroneLabels",
-      "labels": [
-         {"label": "Crash", "color": "#FF0000"},
-         ...
-      ]
-    }
-    Returns a list of (label, color).
-    """
-    if not os.path.exists(path):
-        print(f"DEBUG: label group file missing: {path}")
+def load_label_group_file(lblgroup_path):
+    if not os.path.exists(lblgroup_path):
         return []
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        pairs = []
-        for item in data.get("labels", []):
-            pairs.append((item["label"], item["color"]))
-        return pairs
-    except Exception as e:
-        print(f"DEBUG: load_label_group_file error: {e}")
-        return []
+    lines = []
+    with open(lblgroup_path, 'r', encoding='utf-8') as f:
+        lines = [x.strip() for x in f.readlines() if x.strip()]
+    out = []
+    for ln in lines:
+        parts = ln.split(',')
+        if len(parts) >= 2:
+            out.append((parts[0].strip(), parts[1].strip()))
+    return out
 
 
-def save_label_group_file(path, labels_and_colors):
-    """
-    Writes a .lblgroup JSON file with structure:
-    {
-      "group_name": "filename without extension",
-      "labels": [
-         {"label": "Crash", "color": "#FF0000"},
-         ...
-      ]
-    }
-    """
-    base = os.path.splitext(os.path.basename(path))[0]
-    data = {
-        "group_name": base,
-        "labels": []
-    }
-    for (lbl, col) in labels_and_colors:
-        data["labels"].append({"label": lbl, "color": col})
-
-    try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2)
-        print(f"DEBUG: saved label group -> {path}")
-    except Exception as e:
-        print(f"DEBUG: save_label_group_file error: {e}")
+def save_label_group_file(lblgroup_path, labels_and_colors):
+    with open(lblgroup_path, 'w', encoding='utf-8') as f:
+        for (lbl, col) in labels_and_colors:
+            f.write(f"{lbl},{col}\n")
 
 
-###############################################################################
-#                          HELPER FUNCTIONS                                   #
-###############################################################################
-def hex_to_bgr(hex_color: str):
+def hex_to_bgr(hex_color):
     hex_color = hex_color.lstrip('#')
-    if len(hex_color) == 6:
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-        return (b, g, r)
-    return (255, 255, 255)
+    if len(hex_color) != 6:
+        return (255, 255, 255)
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+    return (b, g, r)
 
 
+###############################################################################
+#                                 DOWNLOAD                                    #
+###############################################################################
 def download_video(youtube_link, download_folder):
+    os.makedirs(download_folder, exist_ok=True)
+
+    # NOTE: keep your existing path; later we can make it config/env-based
+    FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
+
     ydl_opts = {
-        'outtmpl': os.path.join(download_folder, '%(title).50s.%(ext)s'),
-        'format': 'mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4'
+        'format': 'bv*+ba/bestvideo*+bestaudio',
+        'outtmpl': os.path.join(download_folder, '%(title).50s-%(id)s.%(ext)s'),
+        'merge_output_format': 'mp4',
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'ffmpeg_location': FFMPEG_DIR,
+        'extractor_args': {'youtube': {'player_client': ['android']}},
+        'retries': 5,
+        'concurrent_fragment_downloads': 4,
     }
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(youtube_link, download=True)
-            if info.get('_filename'):
-                return info['_filename']
-            else:
-                title = info.get('title', 'video')
-                guessed_path = os.path.join(download_folder, f"{title[:50]}.mp4")
-                if os.path.exists(guessed_path):
-                    return guessed_path
+            # Try to resolve output filename
+            try:
+                p = ydl.prepare_filename(info)
+                base, _ = os.path.splitext(p)
+                mp4 = base + ".mp4"
+                if os.path.exists(mp4):
+                    return mp4
+                if os.path.exists(p):
+                    return p
+            except Exception:
+                pass
     except Exception as e:
-        print(f"DEBUG: download_video exception: {e}")
+        print("DEBUG: download_video failed:", e)
+
     return None
 
 
+###############################################################################
+#                           LABEL LIST for UI                                 #
+###############################################################################
 def get_current_labels():
     return _labels_and_colors
 
 
-def make_safe_name(name):
-    return name.replace(" ", "_")
+def make_safe_name(name: str) -> str:
+    safe = []
+    for ch in (name or ""):
+        if ch.isalnum() or ch in ('-', '_'):
+            safe.append(ch)
+        else:
+            safe.append('_')
+    return "".join(safe).strip('_') or "label"
 
 
-def find_non_collision_filename(folder_path, filename):
-    base, ext = os.path.splitext(filename)
-    if not os.path.exists(os.path.join(folder_path, filename)):
-        return filename
-    count = 2
+def find_non_collision_filename(folder, base_filename):
+    candidate = os.path.join(folder, base_filename)
+    if not os.path.exists(candidate):
+        return candidate
+    idx = 1
     while True:
-        new_filename = f"{base}({count}){ext}"
-        if not os.path.exists(os.path.join(folder_path, new_filename)):
-            return new_filename
-        count += 1
+        name, ext = os.path.splitext(base_filename)
+        new_name = f"{name}_{idx}{ext}"
+        candidate = os.path.join(folder, new_name)
+        if not os.path.exists(candidate):
+            return candidate
+        idx += 1
