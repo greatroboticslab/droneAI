@@ -588,3 +588,9 @@ def get_progress_summary():
     for prefix, rec in data.get("people", {}).items():
         out[prefix] = {"sessions": len(rec.get("sessions", [])), "total_events": int(rec.get("total_events", 0))}
     return out
+
+def get_current_validation_link():
+    return _last_youtube_link
+
+def get_current_validation_sid():
+    return _validation_sid
