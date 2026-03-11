@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, redirect, url_for, jsonify
+from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session
 import os
 import logging
 import pandas as pd
@@ -6,6 +6,7 @@ import io
 import zipfile
 from datetime import datetime
 from functools import wraps
+from mqtt_client import MQTTManager
 from flask import send_file, session
 
 # ===================== VALIDATION BACKEND =====================
@@ -49,6 +50,7 @@ from crash_verify_backend import (
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = "droneai-secret-key"
 
+mqtt_mgr = MQTTManager()
 ADMIN_USER = os.environ.get("DRONEAI_ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("DRONEAI_ADMIN_PASS", "admin123")
 
@@ -92,8 +94,16 @@ def validation_index():
             folder_name=folder_name,
             delete_original=delete_original,
         )
+
+        mqtt_mgr.publish_event("validation_started", {
+            "by": session.get("user", "unknown"),
+            "youtube_link": youtube_link,
+            "folder_name": folder_name
+        })
+        mqtt_mgr.publish_lock(f"val:{youtube_link}", session.get("user", "unknown"), "claimed")
+
         return redirect(url_for("validation_view_stream", source="manual"))
-        
+
     return render_template("validation_index.html")
 
 
@@ -227,7 +237,16 @@ def start_from_excel():
         person_name=match["person"],
         scenario_base=scenario_base,
     )
-    return redirect(url_for("validation_view_stream_page", source="excel"))
+
+    mqtt_mgr.publish_event("validation_started", {
+        "by": session.get("user", "unknown"),
+        "youtube_link": match["link"],
+        "person": match["person"],
+        "scenario": scenario_base
+    })
+    mqtt_mgr.publish_lock(f"val:{match['link']}", session.get("user", "unknown"), "claimed")
+
+    return redirect(url_for("validation_view_stream", source="excel"))
 
 
 
@@ -374,6 +393,13 @@ def training_index():
             labels_and_colors=labels_and_colors,
             keep_metadata=keep_metadata,
         )
+
+        mqtt_mgr.publish_event("validation_started", {
+            "by": "GUI User",
+            "youtube_link": youtube_link,
+            "folder_name": folder_name
+        })
+
         return redirect(url_for("training_preview"))
 
     return render_template("training_index.html", custom_groups=existing_groups)
@@ -575,6 +601,53 @@ def db_export_excel():
         download_name="droneai_export.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+def _mqtt_cfg_view():
+    return {
+        "enabled": mqtt_mgr.enabled,
+        "connected": mqtt_mgr.connected,
+        "host": mqtt_mgr.host,
+        "port": mqtt_mgr.port,
+        "topic_prefix": mqtt_mgr.topic_prefix,
+        "username": mqtt_mgr.username,
+        "password": mqtt_mgr.password,
+    }
+
+@app.route("/mqtt", methods=["GET", "POST"])
+@login_required
+def mqtt_page():
+    if request.method == "POST":
+        enabled = True if request.form.get("enabled") == "on" else False
+        host = request.form.get("host", "")
+        port = request.form.get("port", "1883")
+        topic_prefix = request.form.get("topic_prefix", "droneai")
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+
+        mqtt_mgr.configure(enabled, host, int(port), topic_prefix, username, password)
+
+        action = request.form.get("action", "")
+        if action == "connect":
+            ok, msg = mqtt_mgr.connect()
+            return render_template("mqtt.html", cfg=_mqtt_cfg_view(), message=msg, ok=ok)
+
+        if action == "disconnect":
+            ok, msg = mqtt_mgr.disconnect()
+            return render_template("mqtt.html", cfg=_mqtt_cfg_view(), message=msg, ok=ok)
+
+        return render_template("mqtt.html", cfg=_mqtt_cfg_view(), message="Saved settings.", ok=True)
+
+    return render_template("mqtt.html", cfg=_mqtt_cfg_view())
+
+@app.route("/mqtt_status")
+@login_required
+def mqtt_status():
+    return jsonify({
+        "enabled": mqtt_mgr.enabled,
+        "connected": mqtt_mgr.connected,
+        "events": mqtt_mgr.events[-50:],
+        "locks": mqtt_mgr.locks,
+    })
 
 
 if __name__ == "__main__":
