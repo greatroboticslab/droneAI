@@ -66,6 +66,20 @@ def _db_path():
     repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(repo_dir, "db", "droneai.sqlite")
 
+
+def is_video_locked(lock_key, current_user):
+    info = mqtt_mgr.locks.get(lock_key)
+    if not info:
+        return False, None
+
+    status = info.get("status", "")
+    by_user = info.get("by", "")
+
+    if status == "claimed" and by_user != current_user:
+        return True, by_user
+
+    return False, by_user
+    
 # ============ In-memory cache of Excel entries ============
 EXCEL_ENTRIES = []       # [{"id": 1, "person": "...", "link": "..."}]
 LAST_EXCEL_PATH = None   # used so we can reuse uploaded Excel path (optional)
@@ -89,6 +103,13 @@ def validation_index():
         folder_name = request.form.get("folder_name", "")
         delete_original = True if request.form.get("delete_original") == "on" else False
 
+        current_user = session.get("user", "unknown")
+        lock_key = f"val:{youtube_link}"
+
+        locked, by_user = is_video_locked(lock_key, current_user)
+        if locked:
+            return f"This video is currently being labeled by {by_user}. Please wait or import the latest DB first.", 400
+
         start_validation_thread(
             youtube_link=youtube_link,
             folder_name=folder_name,
@@ -96,11 +117,11 @@ def validation_index():
         )
 
         mqtt_mgr.publish_event("validation_started", {
-            "by": session.get("user", "unknown"),
+            "by": current_user,
             "youtube_link": youtube_link,
             "folder_name": folder_name
         })
-        mqtt_mgr.publish_lock(f"val:{youtube_link}", session.get("user", "unknown"), "claimed")
+        mqtt_mgr.publish_lock(lock_key, current_user, "claimed")
 
         return redirect(url_for("validation_view_stream", source="manual"))
 
@@ -229,6 +250,13 @@ def start_from_excel():
     match = next((e for e in EXCEL_ENTRIES if e["id"] == entry_id), None)
     if not match:
         return "Invalid selection.", 400
+
+    current_user = session.get("user", "unknown")
+    lock_key = f"val:{match['link']}"
+
+    locked, by_user = is_video_locked(lock_key, current_user)
+    if locked:
+        return f"This video is currently being labeled by {by_user}. Please wait or import the latest DB first.", 400
 
     start_validation_thread(
         youtube_link=match["link"],
