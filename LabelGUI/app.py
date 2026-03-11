@@ -413,6 +413,14 @@ def training_index():
         else:
             return "Please select an existing label group or create a new one.", 400
 
+        current_user = session.get("user", "unknown")
+        lock_key = f"train:{youtube_link}"
+
+        locked, by_user = is_video_locked(lock_key, current_user)
+        if locked:
+            return f"This training video is currently being labeled by {by_user}.", 400
+
+
         start_training_session(
             youtube_link=youtube_link,
             user_name=user_name,
@@ -428,6 +436,7 @@ def training_index():
             "youtube_link": youtube_link,
             "folder_name": folder_name
         })
+         mqtt_mgr.publish_lock(lock_key, current_user, "claimed")
 
         return redirect(url_for("training_preview"))
 
