@@ -101,6 +101,7 @@
   const sessionSource = "{{ source|default('manual') }}";
 
   let eventCount = 0;
+  let lockReleased = false;
 
   // Send event label
   eventButtons.forEach(btn => {
@@ -141,8 +142,17 @@
       .then(r => r.text())
       .then(txt => {
         if (txt.trim() === 'done') {
-          // Show completion overlay (clips may still be finishing in background)
+
+          // Release MQTT lock once
+          if (!lockReleased) {
+            lockReleased = true;
+            fetch('/validation_release_lock', { method: 'POST' })
+              .catch(err => console.error('validation_release_lock error:', err));
+          }
+
+          // Show completion overlay
           doneOverlay.style.display = 'block';
+
           if (sessionSource === 'excel') {
             doneMessage.textContent =
               'The video has finished. Your labeled clips and log file are being saved ' +
@@ -152,6 +162,7 @@
               'The video has finished. Your labeled clips and log file are being saved ' +
               'into the ValidationResults folder.';
           }
+
         } else {
           setTimeout(pollStatus, 2000);
         }
@@ -161,6 +172,7 @@
         setTimeout(pollStatus, 4000);
       });
   }
+
   pollStatus();
 </script>
 </body>
