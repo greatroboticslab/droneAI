@@ -52,8 +52,7 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = "droneai-secret-key"
 
 mqtt_mgr = MQTTManager()
-ADMIN_USER = os.environ.get("DRONEAI_ADMIN_USER", "admin")
-ADMIN_PASS = os.environ.get("DRONEAI_ADMIN_PASS", "admin123")
+TEAM_PASSWORD = os.environ.get("DRONEAI_TEAM_PASSWORD", "droneai2025")
 
 def login_required(fn):
     @wraps(fn)
@@ -538,13 +537,19 @@ def training_time_info():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        u = request.form.get("username", "")
-        p = request.form.get("password", "")
-        if u == ADMIN_USER and p == ADMIN_PASS:
+        u = request.form.get("username", "").strip()
+        p = request.form.get("password", "").strip()
+
+        if not u:
+            return render_template("login.html", error="Please enter a username.")
+
+        if p == TEAM_PASSWORD:
             session["is_admin"] = True
             session["user"] = u
             return redirect(url_for("db_tools"))
-        return render_template("login.html", error="Invalid username/password.")
+
+        return render_template("login.html", error="Invalid password.")
+
     return render_template("login.html")
 
 @app.route("/logout")
