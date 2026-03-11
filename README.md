@@ -1,342 +1,311 @@
-# 🛰️ DroneAI Event Labeling & Crash Detection System
+DroneAI is a web-based labeling platform designed to help teams analyze drone flight videos, create machine-learning training data, and verify crash detection results. The system allows multiple people to work on the same dataset across different computers while keeping labeling progress synchronized.
 
-This repository provides a **Flask-based web GUI** to support labeling drone flight videos for research.  
-It allows multiple event types to be labeled during video playback, saves short video clips around each event, and **organizes data automatically by participant**.  
+The platform combines three major components:
 
-✨ **New features** include Excel-based participant import, multiple event categories (take-off, landing, minor crash, severe crash), 5–10 second clips, and JSON-based labeling progress tracking with green/red status indicators.
+• Validation labeling for identifying flight events such as takeoff, landing, and crashes
+• Training dataset generation for machine learning
+• Crash analysis and verification for comparing predicted crashes against human review
 
+To support team collaboration, DroneAI includes:
 
-TO VIEW A VIDEO TUTORIAL, PLEASE USE THE FOLLOWING LINK:
-https://drive.google.com/file/d/1n2QV3i8Uu2Idkk8cB5M0XKKU3GoeiF1J/view?usp=sharing
----
+• A shared SQLite database for storing labeling progress
+• Import/export tools so teammates can continue work on different computers
+• MQTT real-time communication to show labeling activity across the team
+• Video locking to prevent duplicate labeling of the same video
 
-SCREENSHOTS FOR GUIDANCE:
-<img width="1904" height="876" alt="image" src="https://github.com/user-attachments/assets/7f2c699e-da94-4e77-95a7-7db83290040f" />
-This is the landing page of the GUI. The blue area is where you can view and label videos, and the green is to train the AI based on the labled data.
+The entire system runs through a Flask web interface, making it easy for labelers to use without needing programming knowledge.
 
-<img width="1919" height="871" alt="image" src="https://github.com/user-attachments/assets/afd6a9f4-5571-4440-9486-643f4a861d72" />
-Upon clicking on the "Label Validation Data", this is what you see. You can either manually upload a youtube link to process a video, or use our excel sheet by clicking on import excel sheet and selecting our excel file.
+System Overview
 
-<img width="1919" height="605" alt="image" src="https://github.com/user-attachments/assets/c2ac7505-5eae-4617-a40b-4f176bacb018" />
-Upon selecting the excel file, click on "Upload & Parse"
+DroneAI works as a labeling and collaboration tool for drone flight datasets.
 
-<img width="1899" height="846" alt="image" src="https://github.com/user-attachments/assets/7baa2470-77c0-4587-841e-a8b00578377c" />
-In our excel sheet, we see a long list of videos. The very first column lets us know where the video has already been labeled or not. The next columns are person name, the number of sessions and total events, and the link to the video. Scroll down for options.
+The system has four main functional areas:
 
-<img width="1899" height="847" alt="image" src="https://github.com/user-attachments/assets/a0dc0da0-2bf0-4fed-b5bc-311592501180" />
-In the entry bar, select the video which you want to use. It has the same list as the excel. Then select whether the video you selected is real life or a simulation. Don't check download after processing as we need the original video to compare. Then click on "Start Labeling".
+Validation Labeling
 
+Users watch drone videos and mark events such as:
 
+Takeoff
 
+Landing
 
+Minor crashes
 
-## 🧭 Table of Contents
+Severe crashes
 
-- [Features](#-features)
-- [System Requirements](#-system-requirements)
-- [Repository Structure](#-repository-structure)
-- [1. Installation & Setup](#1-installation--setup)
-  - [1.1 Clone the Repository](#11-clone-the-repository)
-  - [1.2 Create a Virtual Environment](#12-create-a-virtual-environment)
-  - [1.3 Install Dependencies](#13-install-dependencies)
-- [2. Running the Application](#2-running-the-application)
-  - [2.1 Starting the Server](#21-starting-the-server)
-  - [2.2 Accessing the GUI](#22-accessing-the-gui)
-- [3. Labeling Workflow](#3-labeling-workflow)
-  - [3.1 Manual Labeling](#31-manual-labeling)
-  - [3.2 Excel-Based Labeling](#32-excelbased-labeling)
-  - [3.3 Event Categories](#33-event-categories)
-  - [3.4 Output Structure](#34-output-structure)
-- [4. Progress Tracking](#4-progress-tracking)
-- [5. Folder & Clip Outputs](#5-folder--clip-outputs)
-- [6. Developer Notes](#6-developer-notes)
-  - [6.1 Code Overview](#61-code-overview)
-  - [6.2 How Event Marking Works](#62-how-event-marking-works)
-- [7. Troubleshooting](#7-troubleshooting)
-- [8. License & Acknowledgments](#8-license--acknowledgments)
+Each labeled event is stored and used to generate labeled video clips and logs.
 
----
+Training Data Collection
 
-## 🚀 Features
+Users label video frames or segments to build datasets that can be used for machine learning models.
 
-- ✅ **Web-based GUI** with live video playback
-- 🆕 **Multiple event categories**: Take-off, Landing, Minor Crash, Severe Crash
-- 📝 Automatic **log file + short clips (10 frames)** per event
-- 📂 **Folder structure organized by participant** (privacy-safe prefix naming)
-- 📊 **Excel import** to preload labeling list
-- 🟢🔴 **Green/red status tracking** for who’s labeled vs not
-- 🧾 `progress.json` file for automatic tracking of labeling progress
-- 🧠 Simple architecture — runs locally, no Docker required
+Crash Analysis / Verification
 
----
+The system compares predicted crash counts from automated detection with human verification results.
 
-## 🧰 System Requirements
+Database Collaboration
 
-- Python 3.10 or newer
-- pip (Python package manager)
-- Modern browser (Chrome, Edge, Firefox, Safari)
-- (Optional) GPU for training downstream models (e.g., YOLOv8)
+All labeling data is stored in a SQLite database. Users can export and import this database to continue labeling work across multiple computers.
 
-Required Python libraries:
-```bash
-Flask
-pandas
-openpyxl
-yt-dlp
-opencv-python
-```
+Collaboration Features
 
----
+DroneAI supports team collaboration through two mechanisms.
 
-## 📁 Repository Structure
+Shared Database Workflow
 
-```
-LabelGUI/
+All labeling sessions are stored in a SQLite database.
+
+Users can:
+
+Export the current database
+
+Share it with teammates
+
+Import the latest version before continuing labeling
+
+This allows multiple people to work on the same dataset across different computers.
+
+Recommended workflow:
+
+Import the latest shared database.
+
+Perform validation or training labeling.
+
+Export the updated database.
+
+Share it with the next teammate.
+
+This ensures everyone works from the latest dataset.
+
+MQTT Real-Time Communication
+
+DroneAI also supports real-time communication using MQTT.
+
+MQTT is a lightweight messaging protocol commonly used in IoT systems.
+
+When connected to an MQTT broker, the system can broadcast live labeling activity such as:
+
+A user starting validation on a video
+
+A user starting training labeling
+
+A labeling session finishing
+
+These events allow teammates to see activity from other computers in real time.
+
+Example event messages:
+
+Haider started validation on video X
+Sarah started training labeling on video Y
+Alex finished validation on video Z
+Video Locking System
+
+To prevent duplicate labeling, DroneAI includes a locking system.
+
+When a user starts labeling a video:
+
+The system publishes a lock message through MQTT.
+
+Other users attempting to label the same video will be warned or blocked.
+
+When the labeling session finishes:
+
+The lock is released automatically.
+
+Other teammates are free to label that video.
+
+This prevents two people from labeling the same video simultaneously.
+
+Login System
+
+DroneAI uses a simple team login system.
+
+Each user logs in using:
+
+• their own username
+• a shared team password
+
+Example:
+
+Username: haider
+Password: droneai2025
+
+This approach allows:
+
+easy team access
+
+identification of which user labeled each video
+
+MQTT activity tracking per user
+
+The username is stored in the session and used when publishing MQTT events.
+
+Project Structure
+DroneAI/
 │
-├── app.py                        # Main Flask application
-├── validation_backend.py         # Video streaming + event logging
-├── video_utils.py                # Pause/skip + frame management
-├── training_backend.py           # (optional) training logic
+├── LabelGUI/
+│   ├── app.py
+│   ├── mqtt_client.py
+│   ├── training_backend.py
+│   ├── validation_backend.py
+│   ├── crash_verify_backend.py
+│   ├── db_store.py
+│   ├── video_utils.py
 │
-├── templates/                    # HTML templates for GUI
-│   ├── home.html
-│   ├── validation_index.html
-│   ├── validation_import.html    # Excel uploader
-│   ├── validation_pick.html      # Participant picker + progress table
-│   └── validation_results.html
+│   ├── templates/
+│   │   ├── home.html
+│   │   ├── login.html
+│   │   ├── training_index.html
+│   │   ├── training_preview.html
+│   │   ├── training_results.html
+│   │   ├── validation_index.html
+│   │   ├── validation_results.html
+│   │   ├── crash_analysis.html
+│   │   └── mqtt.html
 │
-├── static/                       # CSS and assets
-│   └── style.css
+│   └── static/
+│       └── style.css
 │
-├── YouTubeDownloads/             # Temp folder for downloaded videos
-├── ValidationResults/            # All labeled outputs saved here
-│   ├── progress.json             # Labeling progress tracking file
-│   ├── SHON/                     # Example person folder
-│   │   ├── Simulation 1/
-│   │   │   ├── event_log.txt
-│   │   │   ├── takeoff_01.mp4
-│   │   │   └── landing_01.mp4
-│   │   └── Real flight 1/
-│   │       └── ...
-│   └── ...
-└── README.md
-```
-
----
-
-## 🛠 1. Installation & Setup
-
-### 1.1 Clone the Repository
-```bash
-git clone https://github.com/<your_username>/droneAI.git
-cd droneAI/LabelGUI
-```
-
-If you edited the repo on GitHub, make sure to pull the latest:
-```bash
-git fetch origin
-git pull origin main
-```
-
----
-
-### 1.2 Create a Virtual Environment
-```bash
+├── analysis/
+│   ├── data/
+│   └── results/
+│
+└── db/
+    └── droneai.sqlite
+Installation
+1. Clone the repository
+git clone https://github.com/your-repo/droneai.git
+cd DroneAI
+2. Create a virtual environment
 python -m venv venv
-source venv/Scripts/activate      # Windows Git Bash
-# OR
-source venv/bin/activate          # Mac/Linux
-```
 
----
+Activate it:
 
-### 1.3 Install Dependencies
-```bash
+Windows:
+
+venv\Scripts\activate
+
+Mac/Linux:
+
+source venv/bin/activate
+3. Install dependencies
+pip install flask
+pip install pandas
+pip install opencv-python
+pip install paho-mqtt
+
+You can also install from a requirements file if provided:
+
 pip install -r requirements.txt
-# or manually:
-pip install flask pandas openpyxl yt-dlp opencv-python
-```
+Running the Application
 
----
+Start the Flask server:
 
-## 🧭 2. Running the Application
+python LabelGUI/app.py
 
-### 2.1 Starting the Server
-```bash
-source venv/Scripts/activate   # (activate venv)
-python app.py
-```
+Then open a browser and go to:
 
-You should see:
-```
- * Running on http://127.0.0.1:5000
-```
+http://localhost:5000
 
-### 2.2 Accessing the GUI
-Open your browser to:
+You will see the DroneAI dashboard.
 
-```
-http://localhost:5000/
-```
+Using the Application
+1. Validation Labeling
 
----
+Click Start Validation
 
-## 🪂 3. Labeling Workflow
+Enter a YouTube link or choose an entry from Excel
 
-### 3.1 Manual Labeling
-- From the home page, click **“Label Validation Data”**.  
-- Enter:
-  - YouTube video link  
-  - Folder name (person’s name or ID)
-- (Optional) check “Delete original downloaded video after processing”
-- Click **Start Processing**  
-- Watch the video and click event buttons when you see relevant moments:
-  - Take-off
-  - Landing
-  - Minor Crash
-  - Severe Crash
-- Each click logs a timestamp and generates a short video clip (~10 frames before and after the event).
+Watch the video
 
----
+Mark events using the buttons
 
-### 3.2 Excel-Based Labeling
-- Click **“Import Excel & Pick Entry”** on the Validation page.
-- Upload an Excel file containing at least:
-  ```
-  Persona Name | Youtube Link
-  ```
-- After upload, you’ll see a participant list with **green (labeled)** or **red (not yet labeled)** indicators.
-- Select a person and scenario (Simulation or Real flight).
-- Start labeling.
+When the video finishes:
 
----
+labeled clips are saved
 
-### 3.3 Event Categories
+event logs are generated
 
-| Event Type       | Example Action                 | Clip Length         |
-|------------------|----------------------------------|----------------------|
-| Take-off         | Drone launches                  | ± 5 frames           |
-| Landing          | Drone lands                     | ± 5 frames           |
-| Minor Crash      | Soft collision / rough landing  | ± 5 frames           |
-| Severe Crash     | Hard collision                  | ± 5 frames           |
+MQTT lock is released
 
----
+2. Training Labeling
 
-### 3.4 Output Structure
-For each session:
-```
-ValidationResults/
- └── SHON/
-     └── Simulation 1/
-         ├── event_log.txt
-         ├── takeoff_01.mp4
-         ├── landing_01.mp4
-         └── ...
-```
+Click Start Training
 
-`event_log.txt` example:
-```
-YouTube Link: https://youtu.be/k8xM2VsClXg
-Folder: ShontalBotros1
+Enter a video link
 
-Take-off #1: [0:00:02 - 0:00:07]
-Landing #2: [0:01:22 - 0:01:27]
+Choose labeling settings
 
-Total Events Observed: 2
-```
+Label frames for training data generation
 
----
+Training results are saved for later machine learning use.
 
-## 📊 4. Progress Tracking
+3. Crash Analysis / Verification
 
-The system automatically creates and maintains:
+This module compares predicted crash events with human verification.
 
-```
-ValidationResults/progress.json
-```
+Users can review results and export analysis reports.
 
-Example structure:
-```json
-{
-  "updated_at": "2025-10-18T20:30:45.123Z",
-  "people": {
-    "SHON": {
-      "full_names": ["Shontal Botros"],
-      "sessions": [
-        {
-          "scenario": "Simulation",
-          "folder": "ValidationResults/SHON/Simulation 1",
-          "youtube_link": "https://youtu.be/example",
-          "events": 2,
-          "clips": 2,
-          "timestamp": "2025-10-18T20:30:45.123Z"
-        }
-      ],
-      "total_events": 2
-    }
-  }
-}
-```
+4. Database Tools
 
-- ✅ Progress is updated after each labeling session.
-- 🟢 Green in GUI = already labeled at least once
-- 🔴 Red in GUI = not yet labeled
+The DB Tools page allows users to:
 
----
+• Download the current database
+• Upload a previous database
+• Export database tables to Excel
 
-## 🎥 5. Folder & Clip Outputs
+This is used for team collaboration across computers.
 
-For every event:
-- A **short `.mp4` clip** is extracted
-- The event name and index are overlaid on the clip
-- A **single log file** is maintained per session
+MQTT Setup
 
-All outputs are stored under `ValidationResults/<first4letters>/<scenario N>/`.
+MQTT enables real-time collaboration across different machines.
 
-> 💡 *Using first four letters of the name preserves privacy while keeping data organized.*
+To configure MQTT:
 
----
+Open the MQTT page in the GUI.
 
-## 🧑‍💻 6. Developer Notes
+Enter broker settings.
 
-### 6.1 Code Overview
+Example for testing:
 
-| File                        | Purpose                                             |
-|-----------------------------|-----------------------------------------------------|
-| `app.py`                    | Flask routes, navigation, Excel import              |
-| `validation_backend.py`     | Core video processing, event logging, progress save |
-| `video_utils.py`            | Frame streaming, skip/pause                         |
-| `templates/`                | Frontend HTML pages                                 |
-| `progress.json`             | Labeling progress tracker                           |
+Host: broker.hivemq.com
+Port: 1883
+Topic Prefix: droneai
+Username: (leave blank)
+Password: (leave blank)
 
----
+Click Connect.
 
-### 6.2 How Event Marking Works
-1. Flask serves MJPEG stream using `cv2.VideoCapture`.
-2. User clicks event button → `/mark_event`.
-3. Timestamp is recorded from `video_utils.get_current_time_sec()`.
-4. ± N frames around the event are written to a new `.mp4` clip.
-5. Event name + time range is appended to the log file.
-6. Progress is updated in `progress.json`.
+Once connected, the system will broadcast labeling events.
 
----
+Example Team Workflow
 
-## 🛠 7. Troubleshooting
+Recommended workflow for a team:
 
-| Issue | Possible Cause | Fix |
-|-------|----------------|-----|
-| “Video not playing” | Wrong folder / missing YouTube download | Check console for errors |
-| Flask 404 on `/import_excel` | Forgot to pull new code | Run `git pull origin main` |
-| No clips saved | Event marking not triggered / permission error | Check write access in ValidationResults |
-| `pandas` / `openpyxl` error | Missing dependencies | `pip install pandas openpyxl` |
-| Old GUI showing | Browser caching | Hard refresh (Ctrl+F5) |
+Import the latest shared database.
 
----
+Connect to MQTT.
 
-## 📜 8. License & Acknowledgments
+Start validation or training labeling.
 
-- Built for **Drone Flight Research** at Middle Tennessee State University.  
-- Developed with ❤️ using Python, Flask, and OpenCV.  
-- Special thanks to research team contributors and labeling assistants.
+Export the updated database when finished.
 
----
+Share the database with teammates.
+
+This ensures all labeling work stays synchronized.
+
+Technologies Used
+
+DroneAI is built using:
+
+Python
+
+Flask
+
+OpenCV
+
+SQLite
+
+MQTT
+
+HTML / CSS / JavaScript
