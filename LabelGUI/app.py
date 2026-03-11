@@ -18,6 +18,7 @@ from validation_backend import (
     get_extraction_progress,
     toggle_pause,
     skip_video,
+    get_current_validation_link,
 )
 
 # ===================== TRAINING BACKEND =====================
@@ -677,6 +678,21 @@ def mqtt_status():
         "events": mqtt_mgr.events[-50:],
         "locks": mqtt_mgr.locks,
     })
+
+@app.route("/validation_release_lock", methods=["POST"])
+def validation_release_lock():
+    current_user = session.get("user", "unknown")
+    youtube_link = get_current_validation_link()
+
+    if youtube_link:
+        lock_key = f"val:{youtube_link}"
+        mqtt_mgr.publish_lock(lock_key, current_user, "released")
+        mqtt_mgr.publish_event("validation_finished", {
+            "by": current_user,
+            "youtube_link": youtube_link
+        })
+
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
