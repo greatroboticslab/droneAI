@@ -504,6 +504,7 @@ def login():
         p = request.form.get("password", "")
         if u == ADMIN_USER and p == ADMIN_PASS:
             session["is_admin"] = True
+            session["user"] = u
             return redirect(url_for("db_tools"))
         return render_template("login.html", error="Invalid username/password.")
     return render_template("login.html")
