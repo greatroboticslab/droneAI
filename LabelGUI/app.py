@@ -430,12 +430,13 @@ def training_index():
             keep_metadata=keep_metadata,
         )
 
-        mqtt_mgr.publish_event("validation_started", {
-            "by": "GUI User",
+        mqtt_mgr.publish_event("training_started", {
+            "by": current_user,
             "youtube_link": youtube_link,
-            "folder_name": folder_name
+            "user_name": user_name
         })
-         mqtt_mgr.publish_lock(lock_key, current_user, "claimed")
+
+        mqtt_mgr.publish_lock(lock_key, current_user, "claimed")
 
         return redirect(url_for("training_preview"))
 
