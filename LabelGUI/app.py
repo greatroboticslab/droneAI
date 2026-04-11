@@ -1,13 +1,20 @@
-from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session
+from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session, send_file
 import os
 import logging
 import pandas as pd
 import io
 import zipfile
+import base64
+import uuid
+
 from datetime import datetime
 from functools import wraps
 from mqtt_client import MQTTManager
 from flask import send_file, session
+from pathlib import Path
+from functools import wraps
+from db.db_store import DBStore
+from mqtt_client import MQTTManager
 
 # ===================== VALIDATION BACKEND =====================
 from validation_backend import (
@@ -51,16 +58,36 @@ from crash_verify_backend import (
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = "droneai-secret-key"
 
+BASE_DIR = Path(__file__).resolve().parent
+REPO_DIR = BASE_DIR.parent
+DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
+
+db = DBStore(str(DB_PATH))
+mqtt_mgr = MQTTManager()
+
+TEAM_PASSWORD = "droneai2025"
+
 mqtt_mgr = MQTTManager()
 TEAM_PASSWORD = os.environ.get("DRONEAI_TEAM_PASSWORD", "droneai2025")
 
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not session.get("is_admin"):
+        if not session.get("user"):
             return redirect(url_for("login"))
         return fn(*args, **kwargs)
     return wrapper
+
+def leader_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("user"):
+            return redirect(url_for("login"))
+        if session.get("role") != "leader":
+            return "Leader access only.", 403
+        return fn(*args, **kwargs)
+    return wrapper
+
 
 def _db_path():
     repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -79,6 +106,123 @@ def is_video_locked(lock_key, current_user):
         return True, by_user
 
     return False, by_user
+
+def _normalize_dataset_columns(df):
+    cols = {str(c).strip().lower(): c for c in df.columns}
+
+    person_col = None
+    link_col = None
+
+    person_candidates = ["persona name", "person name", "person", "name"]
+    link_candidates = ["youtube link", "youtube url", "youtube", "link", "url"]
+
+    for c in person_candidates:
+        if c in cols:
+            person_col = cols[c]
+            break
+
+    for c in link_candidates:
+        if c in cols:
+            link_col = cols[c]
+            break
+
+    if not person_col or not link_col:
+        raise ValueError("Excel must contain a person/name column and a YouTube link column.")
+
+    return person_col, link_col
+
+def build_dataset_items_from_excel(file_bytes: bytes, dataset_key: str):
+    import pandas as pd
+    from io import BytesIO
+
+    df = pd.read_excel(BytesIO(file_bytes), sheet_name=0)
+    person_col, link_col = _normalize_dataset_columns(df)
+
+    items = []
+    row_num = 0
+    for _, row in df.iterrows():
+        person = str(row.get(person_col) or "").strip()
+        link = str(row.get(link_col) or "").strip()
+        if not link:
+            continue
+        row_num += 1
+        items.append({
+            "item_key": f"{dataset_key}:{row_num}",
+            "row_index": row_num,
+            "person_name": person,
+            "youtube_link": link,
+            "status": "not_labeled",
+            "labeled_by": "",
+            "locked_by": "",
+            "scenario_type": "",
+        })
+    return items
+
+def active_dataset_with_stats():
+    active = db.get_active_dataset()
+    if not active:
+        return None, {"total": 0, "not_labeled": 0, "in_progress": 0, "labeled": 0}
+    stats = db.dataset_stats(active["dataset_key"])
+    return active, stats
+
+def handle_mqtt_event(data: dict):
+    event_type = data.get("type", "")
+
+    if event_type == "dataset_uploaded":
+        dataset_key = data.get("dataset_key")
+        if not dataset_key or db.dataset_exists(dataset_key):
+            return
+
+        file_b64 = data.get("file_b64", "")
+        file_bytes = base64.b64decode(file_b64.encode("utf-8"))
+
+        db.save_dataset(
+            dataset_key=dataset_key,
+            dataset_name=data.get("dataset_name", "Dataset"),
+            original_filename=data.get("original_filename", "dataset.xlsx"),
+            file_blob=file_bytes,
+            uploaded_by=data.get("uploaded_by", ""),
+            is_active=bool(data.get("is_active", False)),
+        )
+        items = build_dataset_items_from_excel(file_bytes, dataset_key)
+        db.replace_dataset_items(dataset_key, items)
+
+    elif event_type == "dataset_set_active":
+        dataset_key = data.get("dataset_key")
+        if dataset_key:
+            db.set_active_dataset(dataset_key)
+
+    elif event_type == "queue_claimed":
+        item_key = data.get("item_key")
+        if item_key:
+            db.update_dataset_item(
+                item_key=item_key,
+                status="in_progress",
+                locked_by=data.get("by", ""),
+                scenario_type=data.get("scenario_type", ""),
+            )
+
+    elif event_type == "item_labeled":
+        item_key = data.get("item_key")
+        if item_key:
+            db.update_dataset_item(
+                item_key=item_key,
+                status="labeled",
+                labeled_by=data.get("by", ""),
+                locked_by="",
+                scenario_type=data.get("scenario_type", ""),
+            )
+
+    elif event_type == "queue_released":
+        item_key = data.get("item_key")
+        if item_key:
+            db.update_dataset_item(
+                item_key=item_key,
+                status=data.get("status", "not_labeled"),
+                locked_by="",
+            )
+
+mqtt_mgr.message_handler = handle_mqtt_event
     
 # ============ In-memory cache of Excel entries ============
 EXCEL_ENTRIES = []       # [{"id": 1, "person": "...", "link": "..."}]
@@ -129,6 +273,7 @@ def validation_index():
 
 
 @app.route("/validation_view_stream")
+@login_required
 def validation_view_stream():
     source = request.args.get("source", "manual")
     return render_template("validation_results.html", source=source)
@@ -538,25 +683,26 @@ def training_time_info():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        u = request.form.get("username", "").strip()
-        p = request.form.get("password", "").strip()
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "").strip()
+        role = request.form.get("role", "team_member").strip()
 
-        if not u:
+        if not username:
             return render_template("login.html", error="Please enter a username.")
 
-        if p == TEAM_PASSWORD:
-            session["is_admin"] = True
-            session["user"] = u
-            return redirect(url_for("db_tools"))
+        if password != TEAM_PASSWORD:
+            return render_template("login.html", error="Invalid password.")
 
-        return render_template("login.html", error="Invalid password.")
+        session["user"] = username
+        session["role"] = role
+        return redirect(url_for("home_page"))
 
     return render_template("login.html")
 
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("home_page"))
+    return redirect(url_for("login"))
 
 @app.route("/db_tools")
 @login_required
@@ -706,6 +852,182 @@ def validation_release_lock():
             "by": current_user,
             "youtube_link": youtube_link
         })
+
+    return jsonify({"ok": True})
+
+@app.route("/")
+@login_required
+def home_page():
+    active, stats = active_dataset_with_stats()
+    datasets = db.list_datasets()
+    return render_template(
+        "home.html",
+        username=session.get("user"),
+        role=session.get("role"),
+        active_dataset=active,
+        stats=stats,
+        datasets=datasets,
+        mqtt_connected=mqtt_mgr.connected,
+    )
+
+@app.route("/datasets", methods=["GET", "POST"])
+@leader_required
+def datasets_page():
+    message = None
+    error = None
+
+    if request.method == "POST":
+        dataset_name = request.form.get("dataset_name", "").strip()
+        make_active = True if request.form.get("make_active") == "on" else False
+        f = request.files.get("excel_file")
+
+        if not f or f.filename == "":
+            error = "Please choose an Excel file."
+        else:
+            file_bytes = f.read()
+            if not dataset_name:
+                dataset_name = Path(f.filename).stem
+
+            dataset_key = str(uuid.uuid4())
+            db.save_dataset(
+                dataset_key=dataset_key,
+                dataset_name=dataset_name,
+                original_filename=f.filename,
+                file_blob=file_bytes,
+                uploaded_by=session.get("user", ""),
+                is_active=make_active or (db.get_active_dataset() is None),
+            )
+
+            items = build_dataset_items_from_excel(file_bytes, dataset_key)
+            db.replace_dataset_items(dataset_key, items)
+
+            mqtt_mgr.publish_event("dataset_uploaded", {
+                "dataset_key": dataset_key,
+                "dataset_name": dataset_name,
+                "original_filename": f.filename,
+                "uploaded_by": session.get("user", ""),
+                "is_active": make_active or (db.get_active_dataset() is None),
+                "file_b64": base64.b64encode(file_bytes).decode("utf-8"),
+            })
+
+            message = f"Dataset '{dataset_name}' uploaded successfully."
+
+    datasets = db.list_datasets()
+    active = db.get_active_dataset()
+    return render_template("datasets.html", datasets=datasets, active_dataset=active, message=message, error=error)
+
+@app.route("/datasets/set_active/<dataset_key>", methods=["POST"])
+@leader_required
+def set_active_dataset(dataset_key):
+    db.set_active_dataset(dataset_key)
+    mqtt_mgr.publish_event("dataset_set_active", {
+        "dataset_key": dataset_key,
+        "by": session.get("user", ""),
+    })
+    return redirect(url_for("datasets_page"))
+
+@app.route("/queue")
+@login_required
+def queue_page():
+    dataset_key = request.args.get("dataset_key")
+    if not dataset_key:
+        active = db.get_active_dataset()
+        if not active:
+            return render_template("queue.html", dataset=None, items=[], stats={"total":0,"not_labeled":0,"in_progress":0,"labeled":0})
+        dataset_key = active["dataset_key"]
+
+    dataset = db.get_dataset(dataset_key)
+    items = db.list_dataset_items(dataset_key)
+    stats = db.dataset_stats(dataset_key)
+
+    return render_template(
+        "queue.html",
+        dataset=dataset,
+        items=items,
+        stats=stats,
+        username=session.get("user"),
+        role=session.get("role"),
+    )
+
+@app.route("/queue/start/<item_key>", methods=["POST"])
+@login_required
+def queue_start_item(item_key):
+    item = db.get_dataset_item(item_key)
+    if not item:
+        return "Item not found.", 404
+
+    current_user = session.get("user", "unknown")
+    if item["locked_by"] and item["locked_by"] != current_user:
+        return f"This video is currently being labeled by {item['locked_by']}.", 400
+
+    scenario_type = request.form.get("scenario_type", "Simulation")
+    delete_original = True if request.form.get("delete_original") == "on" else False
+
+    db.update_dataset_item(
+        item_key=item_key,
+        status="in_progress",
+        locked_by=current_user,
+        scenario_type=scenario_type,
+    )
+
+    mqtt_mgr.publish_event("queue_claimed", {
+        "item_key": item_key,
+        "dataset_key": item["dataset_key"],
+        "by": current_user,
+        "scenario_type": scenario_type,
+    })
+    mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "claimed")
+
+    session["current_item_key"] = item_key
+    session["current_dataset_key"] = item["dataset_key"]
+    session["current_youtube_link"] = item["youtube_link"]
+    session["current_scenario_type"] = scenario_type
+
+    start_validation_thread(
+        youtube_link=item["youtube_link"],
+        folder_name=None,
+        delete_original=delete_original,
+        person_name=item["person_name"],
+        scenario_base=scenario_type,
+    )
+
+    mqtt_mgr.publish_event("validation_started", {
+        "by": current_user,
+        "youtube_link": item["youtube_link"],
+        "person": item["person_name"],
+        "scenario": scenario_type,
+        "item_key": item_key,
+    })
+
+    return redirect(url_for("validation_view_stream", source="dataset"))
+
+@app.route("/validation_release_lock", methods=["POST"])
+@login_required
+def validation_release_lock():
+    current_user = session.get("user", "unknown")
+    item_key = session.get("current_item_key")
+    scenario_type = session.get("current_scenario_type", "")
+
+    if item_key:
+        db.update_dataset_item(
+            item_key=item_key,
+            status="labeled",
+            labeled_by=current_user,
+            locked_by="",
+            scenario_type=scenario_type,
+        )
+
+        mqtt_mgr.publish_event("item_labeled", {
+            "item_key": item_key,
+            "by": current_user,
+            "scenario_type": scenario_type,
+        })
+        mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "released")
+
+        session.pop("current_item_key", None)
+        session.pop("current_dataset_key", None)
+        session.pop("current_youtube_link", None)
+        session.pop("current_scenario_type", None)
 
     return jsonify({"ok": True})
 
