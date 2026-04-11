@@ -12,9 +12,7 @@ from functools import wraps
 from mqtt_client import MQTTManager
 from flask import send_file, session
 from pathlib import Path
-from functools import wraps
 from db.db_store import DBStore
-from mqtt_client import MQTTManager
 
 # ===================== VALIDATION BACKEND =====================
 from validation_backend import (
@@ -66,9 +64,6 @@ db = DBStore(str(DB_PATH))
 mqtt_mgr = MQTTManager()
 
 TEAM_PASSWORD = "droneai2025"
-
-mqtt_mgr = MQTTManager()
-TEAM_PASSWORD = os.environ.get("DRONEAI_TEAM_PASSWORD", "droneai2025")
 
 def login_required(fn):
     @wraps(fn)
