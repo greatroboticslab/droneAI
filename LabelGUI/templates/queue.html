@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Shared Queue</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">Shared Labeling Queue</div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Dashboard</a>
+      {% if role == 'leader' %}
+        <a class="btn btn--ghost" href="/datasets">Dataset Manager</a>
+      {% endif %}
+      <a class="btn btn--ghost" href="/logout">Logout</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  {% if dataset %}
+    <div class="card" style="margin-bottom:18px;">
+      <h2>{{ dataset.dataset_name }}</h2>
+      <p class="muted">{{ dataset.original_filename }}</p>
+
+      <div class="actions">
+        <span class="chip">Total: {{ stats.total }}</span>
+        <span class="chip">Not labeled: {{ stats.not_labeled }}</span>
+        <span class="chip">In progress: {{ stats.in_progress }}</span>
+        <span class="chip">Labeled: {{ stats.labeled }}</span>
+      </div>
+    </div>
+
+    <div class="card" style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Row</th>
+            <th>Person</th>
+            <th>Link</th>
+            <th>Status</th>
+            <th>Labeled By</th>
+            <th>Locked By</th>
+            <th>Start</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+          <tr>
+            <td>{{ item.row_index }}</td>
+            <td><b>{{ item.person_name }}</b></td>
+            <td class="truncate" title="{{ item.youtube_link }}">{{ item.youtube_link }}</td>
+            <td>
+              {% if item.status == 'labeled' %}
+                <span class="chip chip--ok">Labeled</span>
+              {% elif item.status == 'in_progress' %}
+                <span class="chip">In Progress</span>
+              {% else %}
+                <span class="chip chip--no">Not Labeled</span>
+              {% endif %}
+            </td>
+            <td>{{ item.labeled_by or '-' }}</td>
+            <td>{{ item.locked_by or '-' }}</td>
+            <td>
+              {% if item.status == 'not_labeled' or item.locked_by == username %}
+              <form method="POST" action="/queue/start/{{ item.item_key }}">
+                <label>Scenario</label>
+                <select name="scenario_type">
+                  <option value="Simulation">Simulation</option>
+                  <option value="Real flight">Real flight</option>
+                </select>
+                <label style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                  <input type="checkbox" name="delete_original" style="width:auto;">
+                  Delete original
+                </label>
+                <button class="btn btn--primary" type="submit" style="margin-top:8px;">Start</button>
+              </form>
+              {% else %}
+                <span class="muted">Unavailable</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="card">
+      <h2>No dataset selected</h2>
+      <p class="muted">A leader needs to upload and activate a dataset first.</p>
+    </div>
+  {% endif %}
+</main>
+</body>
+</html>
