@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dataset Manager</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">Leader Dataset Manager</div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Dashboard</a>
+      <a class="btn btn--ghost" href="/queue">Shared Queue</a>
+      <a class="btn btn--ghost" href="/logout">Logout</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <div class="grid grid--2">
+    <section class="card">
+      <h2>Upload New Dataset</h2>
+
+      {% if message %}<p><b>{{ message }}</b></p>{% endif %}
+      {% if error %}<p style="color:#ef4444;"><b>{{ error }}</b></p>{% endif %}
+
+      <form method="POST" action="/datasets" enctype="multipart/form-data">
+        <label>Dataset Name</label>
+        <input name="dataset_name" placeholder="Example: All-in-one Videos">
+
+        <label>Excel File</label>
+        <input type="file" name="excel_file" accept=".xlsx,.xls" required>
+
+        <label style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+          <input type="checkbox" name="make_active" style="width:auto;">
+          Make this the active dataset
+        </label>
+
+        <div class="actions actions--big">
+          <button class="btn btn--primary" type="submit">Upload Dataset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Existing Datasets</h2>
+
+      {% if datasets %}
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>File</th>
+              <th>Uploaded By</th>
+              <th>Active</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in datasets %}
+            <tr>
+              <td><b>{{ d.dataset_name }}</b></td>
+              <td>{{ d.original_filename }}</td>
+              <td>{{ d.uploaded_by }}</td>
+              <td>
+                {% if d.is_active %}
+                  <span class="chip chip--ok">Active</span>
+                {% else %}
+                  <span class="chip chip--no">Inactive</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if not d.is_active %}
+                <form method="POST" action="/datasets/set_active/{{ d.dataset_key }}">
+                  <button class="btn btn--secondary" type="submit">Set Active</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No datasets uploaded yet.</p>
+      {% endif %}
+    </section>
+  </div>
+</main>
+</body>
+</html>
