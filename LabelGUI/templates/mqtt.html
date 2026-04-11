@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MQTT Settings</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">MQTT Configuration + Live Team Feed</div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Home</a>
+      <a class="btn btn--ghost" href="/queue">Shared Queue</a>
+      <a class="btn btn--ghost" href="/logout">Logout</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <div class="grid grid--2">
+
+    <section class="card">
+      <h2>MQTT Configure</h2>
+
+      {% if message %}
+        <p><b>{{ message }}</b></p>
+      {% endif %}
+
+      <form method="POST" action="/mqtt">
+        <label style="display:flex; gap:10px; align-items:center;">
+          <input type="checkbox" name="enabled" {% if cfg.enabled %}checked{% endif %} style="width:auto;">
+          Enable MQTT
+        </label>
+
+        <label>Broker Host</label>
+        <input name="host" value="{{ cfg.host }}" placeholder="e.g. broker.hivemq.com" />
+
+        <label>Broker Port</label>
+        <input name="port" value="{{ cfg.port }}" />
+
+        <label>Topic Prefix</label>
+        <input name="topic_prefix" value="{{ cfg.topic_prefix }}" />
+
+        <label>Username (optional)</label>
+        <input name="username" value="{{ cfg.username }}" />
+
+        <label>Password (optional)</label>
+        <input name="password" type="password" value="{{ cfg.password }}" />
+
+        <div class="actions actions--big">
+          <button class="btn btn--secondary" name="action" value="save" type="submit">Save</button>
+          <button class="btn btn--primary" name="action" value="connect" type="submit">Connect</button>
+          <button class="btn btn--ghost" name="action" value="disconnect" type="submit">Disconnect</button>
+        </div>
+
+        <p class="muted">
+          Status:
+          {% if cfg.connected %}
+            <b>Connected</b>
+          {% else %}
+            <b>Disconnected</b>
+          {% endif %}
+        </p>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Live Team Activity</h2>
+      <p class="muted">Refreshes automatically.</p>
+      <div id="feed" style="display:flex; flex-direction:column; gap:10px;"></div>
+    </section>
+
+  </div>
+</main>
+
+<script>
+async function refreshFeed() {
+  try {
+    const res = await fetch("/mqtt_status");
+    const data = await res.json();
+
+    const feed = document.getElementById("feed");
+    feed.innerHTML = "";
+
+    const events = (data.events || []).slice().reverse();
+    if (events.length === 0) {
+      const div = document.createElement("div");
+      div.className = "card";
+      div.style.padding = "12px";
+      div.innerHTML = `<div class="muted">No MQTT activity yet.</div>`;
+      feed.appendChild(div);
+      return;
+    }
+
+    for (const e of events) {
+      const div = document.createElement("div");
+      div.className = "card";
+      div.style.padding = "12px";
+      div.innerHTML = `
+        <div style="font-weight:800;">${e.type || "event"}</div>
+        <div class="muted" style="font-size:12px;">${e.ts || ""}</div>
+        <div style="margin-top:6px; word-break:break-word;">${JSON.stringify(e)}</div>
+      `;
+      feed.appendChild(div);
+    }
+  } catch (err) {
+    console.error("mqtt_status error:", err);
+  }
+}
+
+setInterval(refreshFeed, 1500);
+refreshFeed();
+</script>
+
+</body>
+</html>
