@@ -103,7 +103,6 @@
   let eventCount = 0;
   let lockReleased = false;
 
-  // Send event label
   eventButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const ev = btn.getAttribute('data-event');
@@ -123,7 +122,6 @@
     });
   });
 
-  // Playback buttons
   pauseBtn.addEventListener('click', () => {
     fetch('/toggle_pause', {method: 'POST'});
   });
@@ -136,27 +134,24 @@
     fetch('/fast_forward', {method: 'POST'});
   });
 
-  // Poll status so we know when the video is done
   function pollStatus() {
     fetch('/check_status')
       .then(r => r.text())
       .then(txt => {
         if (txt.trim() === 'done') {
 
-          // Release MQTT lock once
           if (!lockReleased) {
             lockReleased = true;
             fetch('/validation_release_lock', { method: 'POST' })
               .catch(err => console.error('validation_release_lock error:', err));
           }
 
-          // Show completion overlay
           doneOverlay.style.display = 'block';
 
-          if (sessionSource === 'excel') {
+          if (sessionSource === 'excel' || sessionSource === 'dataset') {
             doneMessage.textContent =
-              'The video has finished. Your labeled clips and log file are being saved ' +
-              'into this person\'s folder. You can now pick another video to label.';
+              'The video has finished. Your labeled clips and log file are being saved. ' +
+              'This queue item has been marked labeled for the team.';
           } else {
             doneMessage.textContent =
               'The video has finished. Your labeled clips and log file are being saved ' +
