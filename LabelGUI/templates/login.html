@@ -3,32 +3,37 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Login</title>
+  <title>DroneAI Login</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main class="container">
-    <div class="card" style="max-width:520px; margin:40px auto;">
-      <h2>Admin Login</h2>
-      <p class="muted">Required to import/export the shared dataset database.</p>
+<main class="container">
+  <div class="card" style="max-width:560px; margin:48px auto;">
+    <h1>DroneAI</h1>
+    <p class="muted">Team login for shared labeling workflow.</p>
 
-      {% if error %}
-        <p style="color:#ef4444;"><b>{{ error }}</b></p>
-      {% endif %}
+    {% if error %}
+      <p style="color:#ef4444;"><b>{{ error }}</b></p>
+    {% endif %}
 
-      <form method="POST" action="/login">
-        <label>Username</label>
-        <input name="username" required>
+    <form method="POST" action="/login">
+      <label>Username</label>
+      <input name="username" placeholder="Your name" required>
 
-        <label style="margin-top:10px;">Password</label>
-        <input name="password" type="password" required>
+      <label>Password</label>
+      <input name="password" type="password" placeholder="Shared team password" required>
 
-        <div style="margin-top:14px;">
-          <button class="btn btn--primary" type="submit">Login</button>
-          <a class="btn btn--ghost" href="/">Cancel</a>
-        </div>
-      </form>
-    </div>
-  </main>
+      <label>Role</label>
+      <select name="role">
+        <option value="team_member">Team Member</option>
+        <option value="leader">Leader</option>
+      </select>
+
+      <div class="actions actions--big">
+        <button class="btn btn--primary" type="submit">Login</button>
+      </div>
+    </form>
+  </div>
+</main>
 </body>
 </html>
