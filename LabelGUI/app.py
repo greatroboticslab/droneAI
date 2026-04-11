@@ -230,14 +230,6 @@ LAST_EXCEL_PATH = None   # used so we can reuse uploaded Excel path (optional)
 
 
 ###############################################################################
-#                                   HOME                                      #
-###############################################################################
-@app.route("/")
-def home_page():
-    return render_template("home.html")
-
-
-###############################################################################
 #                           VALIDATION WORKFLOW                               #
 ###############################################################################
 @app.route("/validation_index", methods=["GET", "POST"])
@@ -839,21 +831,6 @@ def mqtt_status():
         "events": mqtt_mgr.events[-50:],
         "locks": mqtt_mgr.locks,
     })
-
-@app.route("/validation_release_lock", methods=["POST"])
-def validation_release_lock():
-    current_user = session.get("user", "unknown")
-    youtube_link = get_current_validation_link()
-
-    if youtube_link:
-        lock_key = f"val:{youtube_link}"
-        mqtt_mgr.publish_lock(lock_key, current_user, "released")
-        mqtt_mgr.publish_event("validation_finished", {
-            "by": current_user,
-            "youtube_link": youtube_link
-        })
-
-    return jsonify({"ok": True})
 
 @app.route("/")
 @login_required
