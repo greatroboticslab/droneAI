@@ -803,7 +803,14 @@ def mqtt_page():
         username = request.form.get("username", "")
         password = request.form.get("password", "")
 
-        mqtt_mgr.configure(enabled, host, int(port), topic_prefix, username, password)
+        mqtt_mgr.configure(
+            enabled=False,
+            host="broker.hivemq.com",
+            port=1883,
+            topic_prefix="droneai-2026",
+            username="",
+            password=""
+        )
 
         action = request.form.get("action", "")
         if action == "connect":
