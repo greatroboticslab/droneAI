@@ -11,12 +11,12 @@
   <div class="topbar-inner">
     <div class="brand">
       <div class="brand__title">DroneAI</div>
-      <div class="brand__subtitle">Shared Labeling Queue</div>
+      <div class="brand__subtitle">Team Queue</div>
     </div>
     <div class="nav-actions">
       <a class="btn btn--ghost" href="/">Dashboard</a>
       {% if role == 'leader' %}
-        <a class="btn btn--ghost" href="/datasets">Dataset Manager</a>
+        <a class="btn btn--ghost" href="/datasets">Datasets</a>
       {% endif %}
       <a class="btn btn--ghost" href="/logout">Logout</a>
     </div>
@@ -31,8 +31,8 @@
 
       <div class="actions">
         <span class="chip">Total: {{ stats.total }}</span>
-        <span class="chip">Not labeled: {{ stats.not_labeled }}</span>
-        <span class="chip">In progress: {{ stats.in_progress }}</span>
+        <span class="chip">Not Labeled: {{ stats.not_labeled }}</span>
+        <span class="chip">In Progress: {{ stats.in_progress }}</span>
         <span class="chip">Labeled: {{ stats.labeled }}</span>
       </div>
     </div>
@@ -43,11 +43,11 @@
           <tr>
             <th>Row</th>
             <th>Person</th>
-            <th>Link</th>
+            <th>Video</th>
             <th>Status</th>
             <th>Labeled By</th>
             <th>Locked By</th>
-            <th>Start</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
@@ -82,7 +82,7 @@
                 <button class="btn btn--primary" type="submit" style="margin-top:8px;">Start</button>
               </form>
               {% else %}
-                <span class="muted">Unavailable</span>
+                <span class="muted">Locked</span>
               {% endif %}
             </td>
           </tr>
@@ -93,7 +93,7 @@
   {% else %}
     <div class="card">
       <h2>No dataset selected</h2>
-      <p class="muted">A leader needs to upload and activate a dataset first.</p>
+      <p class="muted">No active dataset is available.</p>
     </div>
   {% endif %}
 </main>
