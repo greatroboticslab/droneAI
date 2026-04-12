@@ -12,7 +12,7 @@
   <div class="topbar-inner">
     <div class="brand">
       <div class="brand__title">DroneAI</div>
-      <div class="brand__subtitle">Agent Setup + System Health</div>
+      <div class="brand__subtitle">System Checks</div>
     </div>
     <div class="nav-actions">
       <a class="btn btn--ghost" href="/">Dashboard</a>
@@ -38,15 +38,13 @@
   <div class="grid grid--2">
 
     <section class="card">
-      <h2>Agent Actions</h2>
-      <p class="muted">
-        This is the first agent version. It helps with setup and health checking without replacing the current app workflow.
-      </p>
+      <h2>Actions</h2>
+      <p class="muted">Run setup and health checks.</p>
 
       <form method="POST" action="/agent">
         <input type="hidden" name="action" value="install_mqtt">
         <div class="actions actions--big">
-          <button class="btn btn--primary" type="submit">Install MQTT Package</button>
+          <button class="btn btn--primary" type="submit">Install MQTT</button>
         </div>
       </form>
     </section>
@@ -57,7 +55,7 @@
       <table>
         <tbody>
           <tr>
-            <th>MQTT Package Installed</th>
+            <th>MQTT Package</th>
             <td>
               {% if status.mqtt_package_installed %}
                 <span class="chip chip--ok">Yes</span>
@@ -67,7 +65,7 @@
             </td>
           </tr>
           <tr>
-            <th>Database Exists</th>
+            <th>Database</th>
             <td>
               {% if status.db_exists %}
                 <span class="chip chip--ok">Yes</span>
@@ -101,11 +99,11 @@
             </td>
           </tr>
           <tr>
-            <th>MQTT Host</th>
+            <th>Broker Host</th>
             <td>{{ status.mqtt_host or "-" }}</td>
           </tr>
           <tr>
-            <th>MQTT Port</th>
+            <th>Broker Port</th>
             <td>{{ status.mqtt_port or "-" }}</td>
           </tr>
           <tr>
