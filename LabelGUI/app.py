@@ -783,7 +783,7 @@ def db_export_excel():
 
 def _mqtt_cfg_view():
     return {
-        "enabled": True if mqtt_mgr.enabled or True else False,
+        "enabled": True,
         "connected": mqtt_mgr.connected,
         "host": mqtt_mgr.host or "broker.hivemq.com",
         "port": mqtt_mgr.port or 1883,
