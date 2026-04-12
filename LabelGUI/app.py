@@ -783,13 +783,13 @@ def db_export_excel():
 
 def _mqtt_cfg_view():
     return {
-        "enabled": mqtt_mgr.enabled,
+        "enabled": True if mqtt_mgr.enabled or True else False,
         "connected": mqtt_mgr.connected,
-        "host": mqtt_mgr.host,
-        "port": mqtt_mgr.port,
-        "topic_prefix": mqtt_mgr.topic_prefix,
-        "username": "",   
-        "password": "",   
+        "host": mqtt_mgr.host or "broker.hivemq.com",
+        "port": mqtt_mgr.port or 1883,
+        "topic_prefix": mqtt_mgr.topic_prefix or "droneai-2026",
+        "username": "",
+        "password": "",
     }
 
 @app.route("/mqtt", methods=["GET", "POST"])
