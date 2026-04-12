@@ -11,7 +11,7 @@
   <div class="topbar-inner">
     <div class="brand">
       <div class="brand__title">DroneAI</div>
-      <div class="brand__subtitle">Leader Dataset Manager</div>
+      <div class="brand__subtitle">Dataset Management</div>
     </div>
     <div class="nav-actions">
       <a class="btn btn--ghost" href="/">Dashboard</a>
@@ -31,14 +31,14 @@
 
       <form method="POST" action="/datasets" enctype="multipart/form-data">
         <label>Dataset Name</label>
-        <input name="dataset_name" placeholder="Example: All-in-one Videos">
+        <input name="dataset_name" placeholder="Dataset name">
 
         <label>Excel File</label>
         <input type="file" name="excel_file" accept=".xlsx,.xls" required>
 
         <label style="display:flex; gap:10px; align-items:center; margin-top:12px;">
           <input type="checkbox" name="make_active" style="width:auto;">
-          Make this the active dataset
+          Set as active dataset
         </label>
 
         <div class="actions actions--big">
@@ -77,7 +77,7 @@
               <td>
                 {% if not d.is_active %}
                 <form method="POST" action="/datasets/set_active/{{ d.dataset_key }}">
-                  <button class="btn btn--secondary" type="submit">Set Active</button>
+                  <button class="btn btn--secondary" type="submit">Make Active</button>
                 </form>
                 {% endif %}
               </td>
@@ -86,7 +86,7 @@
           </tbody>
         </table>
       {% else %}
-        <p class="muted">No datasets uploaded yet.</p>
+        <p class="muted">No datasets available.</p>
       {% endif %}
     </section>
   </div>
