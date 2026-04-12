@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session, send_file
+from agent_tools import overall_agent_status, install_package, mqtt_package_status
 import os
 import logging
 import pandas as pd
@@ -1002,6 +1003,39 @@ def validation_release_lock():
         session.pop("current_scenario_type", None)
 
     return jsonify({"ok": True})
+
+@app.route("/agent", methods=["GET", "POST"])
+@login_required
+def agent_page():
+    message = None
+    error = None
+
+    if request.method == "POST":
+        action = request.form.get("action", "").strip()
+
+        if action == "install_mqtt":
+            ok, msg = install_package("paho-mqtt")
+            if ok:
+                message = msg
+            else:
+                error = msg
+
+    status = overall_agent_status(mqtt_mgr)
+    mqtt_pkg = mqtt_package_status()
+
+    return render_template(
+        "agent.html",
+        status=status,
+        mqtt_pkg=mqtt_pkg,
+        message=message,
+        error=error,
+    )
+
+
+@app.route("/agent/status")
+@login_required
+def agent_status_api():
+    return jsonify(overall_agent_status(mqtt_mgr))
 
 
 if __name__ == "__main__":
