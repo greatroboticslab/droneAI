@@ -47,11 +47,11 @@
         <label>Topic Prefix</label>
         <input name="topic_prefix" value="{{ cfg.topic_prefix }}" />
 
-        <label>Username</label>
-        <input name="username" value="{{ cfg.username }}" />
-
-        <label>Password</label>
-        <input name="password" type="password" value="{{ cfg.password }}" />
+        <label>Broker Username</label>
+        <input name="mqtt_username" value="" autocomplete="off" />
+        
+        <label>Broker Password</label>
+        <input name="mqtt_password" type="password" value="" autocomplete="new-password" />
 
         <div class="actions actions--big">
           <button class="btn btn--secondary" name="action" value="save" type="submit">Save</button>
