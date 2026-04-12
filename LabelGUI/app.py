@@ -788,8 +788,8 @@ def _mqtt_cfg_view():
         "host": mqtt_mgr.host,
         "port": mqtt_mgr.port,
         "topic_prefix": mqtt_mgr.topic_prefix,
-        "username": mqtt_mgr.username,
-        "password": mqtt_mgr.password,
+        "username": "",   
+        "password": "",   
     }
 
 @app.route("/mqtt", methods=["GET", "POST"])
