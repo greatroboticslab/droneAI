@@ -39,14 +39,18 @@
 
     <section class="card">
       <h2>Actions</h2>
-      <p class="muted">Run setup and health checks.</p>
-
-      <form method="POST" action="/agent">
-        <input type="hidden" name="action" value="install_mqtt">
-        <div class="actions actions--big">
-          <button class="btn btn--primary" type="submit">Install MQTT</button>
-        </div>
-      </form>
+      <p class="muted">Setup and health checks.</p>
+    
+      {% if status.mqtt_package_installed %}
+        <p><span class="chip chip--ok">MQTT package installed</span></p>
+      {% else %}
+        <form method="POST" action="/agent">
+          <input type="hidden" name="action" value="install_mqtt">
+          <div class="actions actions--big">
+            <button class="btn btn--primary" type="submit">Install MQTT</button>
+          </div>
+        </form>
+      {% endif %}
     </section>
 
     <section class="card">
