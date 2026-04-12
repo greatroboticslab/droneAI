@@ -812,8 +812,8 @@ def mqtt_page():
         port = int(request.form.get("port", "1883") or 1883)
         topic_prefix = (request.form.get("topic_prefix", "") or "droneai-2026").strip()
 
-        username = ""
-        password = ""
+        username = request.form.get("mqtt_username", "").strip()
+        password = request.form.get("mqtt_password", "").strip()
 
         mqtt_mgr.configure(enabled, host, port, topic_prefix, username, password)
 
