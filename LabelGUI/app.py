@@ -795,35 +795,45 @@ def _mqtt_cfg_view():
 @app.route("/mqtt", methods=["GET", "POST"])
 @login_required
 def mqtt_page():
+    message = None
+    error = None
+
     if request.method == "POST":
         enabled = True if request.form.get("enabled") == "on" else False
-        host = request.form.get("host", "")
-        port = request.form.get("port", "1883")
-        topic_prefix = request.form.get("topic_prefix", "droneai")
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
+        host = (request.form.get("host", "") or "broker.hivemq.com").strip()
+        port = int(request.form.get("port", "1883") or 1883)
+        topic_prefix = (request.form.get("topic_prefix", "") or "droneai-2026").strip()
 
-        mqtt_mgr.configure(
-            enabled=False,
-            host="broker.hivemq.com",
-            port=1883,
-            topic_prefix="droneai-2026",
-            username="",
-            password=""
-        )
+        username = ""
+        password = ""
 
-        action = request.form.get("action", "")
+        mqtt_mgr.configure(enabled, host, port, topic_prefix, username, password)
+
+        action = request.form.get("action", "").strip()
+
         if action == "connect":
             ok, msg = mqtt_mgr.connect()
-            return render_template("mqtt.html", cfg=_mqtt_cfg_view(), message=msg, ok=ok)
+            if ok:
+                message = msg
+            else:
+                error = msg
 
-        if action == "disconnect":
+        elif action == "disconnect":
             ok, msg = mqtt_mgr.disconnect()
-            return render_template("mqtt.html", cfg=_mqtt_cfg_view(), message=msg, ok=ok)
+            if ok:
+                message = msg
+            else:
+                error = msg
 
-        return render_template("mqtt.html", cfg=_mqtt_cfg_view(), message="Saved settings.", ok=True)
+        elif action == "save":
+            message = "Settings saved."
 
-    return render_template("mqtt.html", cfg=_mqtt_cfg_view())
+    return render_template(
+        "mqtt.html",
+        cfg=_mqtt_cfg_view(),
+        message=message,
+        error=error,
+    )
 
 @app.route("/mqtt_status")
 @login_required
