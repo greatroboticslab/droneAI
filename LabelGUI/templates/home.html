@@ -11,12 +11,12 @@
   <div class="topbar-inner">
     <div class="brand">
       <div class="brand__title">DroneAI</div>
-      <div class="brand__subtitle">Team Dashboard</div>
+      <div class="brand__subtitle">Shared Labeling Workspace</div>
     </div>
     <div class="nav-actions">
       <a class="btn btn--ghost" href="/queue">Shared Queue</a>
       {% if role == 'leader' %}
-        <a class="btn btn--ghost" href="/datasets">Dataset Manager</a>
+        <a class="btn btn--ghost" href="/datasets">Datasets</a>
       {% endif %}
       <a class="btn btn--ghost" href="/agent">Agent</a>
       <a class="btn btn--ghost" href="/mqtt">MQTT</a>
@@ -39,21 +39,21 @@
 
   {% if active_dataset %}
     <div class="card" style="margin-bottom:18px;">
-      <h2>Active Dataset</h2>
+      <h2>Current Dataset</h2>
       <p><b>{{ active_dataset.dataset_name }}</b></p>
-      <p class="muted">{{ active_dataset.original_filename }} · uploaded by {{ active_dataset.uploaded_by }}</p>
+      <p class="muted">Uploaded by {{ active_dataset.uploaded_by }}</p>
 
       <div class="actions actions--big">
-        <a class="btn btn--primary" href="/queue?dataset_key={{ active_dataset.dataset_key }}">Open Shared Queue</a>
+        <a class="btn btn--primary" href="/queue?dataset_key={{ active_dataset.dataset_key }}">Open Queue</a>
         {% if role == 'leader' %}
-          <a class="btn btn--secondary" href="/datasets">Manage Datasets</a>
+          <a class="btn btn--secondary" href="/datasets">Datasets</a>
         {% endif %}
       </div>
     </div>
 
     <div class="grid grid--2">
       <div class="card">
-        <h3>Total Items</h3>
+        <h3>Total</h3>
         <p style="font-size:28px; font-weight:800;">{{ stats.total }}</p>
       </div>
       <div class="card">
@@ -71,8 +71,8 @@
     </div>
   {% else %}
     <div class="card">
-      <h2>No active dataset yet</h2>
-      <p class="muted">A leader needs to upload a dataset first.</p>
+      <h2>No dataset selected</h2>
+      <p class="muted">A leader must upload and activate a dataset first.</p>
       {% if role == 'leader' %}
         <div class="actions actions--big">
           <a class="btn btn--primary" href="/datasets">Upload Dataset</a>
