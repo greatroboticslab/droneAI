@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Video Stream — Mark Events</title>
+  <title>Validation</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     #done-overlay {
@@ -27,67 +27,58 @@
 </head>
 <body>
 <div class="container">
-  <h1>Video Stream — Mark Events</h1>
+  <h1>Validation</h1>
 
-  <!-- Video area -->
   <div>
     <img id="video-feed"
          src="{{ url_for('validation_video_feed') }}"
-         alt="Video stream will appear here"
+         alt="Video stream"
          style="width:100%; max-height:480px; object-fit:contain; border:1px solid #ccc;">
   </div>
 
   <p style="margin-top:6px; font-size:0.9em; color:#9ca3af;">
-    If the video area is blank, the video may still be downloading from YouTube. Please wait a few seconds.
+    If the video does not appear right away, please wait a moment.
   </p>
 
-  <!-- Playback controls -->
   <div style="margin-top: 10px;">
-    <button id="rewind-btn">« Rewind 10s</button>
+    <button id="rewind-btn">Rewind 10s</button>
     <button id="pause-btn">Pause / Resume</button>
-    <button id="forward-btn">Forward 10s »</button>
+    <button id="forward-btn">Forward 10s</button>
   </div>
 
   <hr>
 
-  <!-- Event buttons -->
-  <h2>Mark Events</h2>
+  <h2>Events</h2>
   <div style="margin-bottom: 12px;">
-    <button class="event-btn" data-event="takeoff">Mark Take-off</button>
-    <button class="event-btn" data-event="land">Mark Land</button>
-    <button class="event-btn" data-event="minor-crash">Mark Minor Crash</button>
-    <button class="event-btn" data-event="severe-crash">Mark Severe Crash</button>
+    <button class="event-btn" data-event="takeoff">Take-off</button>
+    <button class="event-btn" data-event="land">Land</button>
+    <button class="event-btn" data-event="minor-crash">Minor Crash</button>
+    <button class="event-btn" data-event="severe-crash">Severe Crash</button>
   </div>
 
-  <p>Total Events Observed: <span id="event-count">0</span></p>
+  <p>Events Marked: <span id="event-count">0</span></p>
 
-  <!-- End-of-session overlay -->
   <div id="done-overlay">
-    <h2>Labeling Session Complete</h2>
+    <h2>Session Complete</h2>
     <p id="done-message">
-      The video has finished and your labeled clips + log file are being saved
-      into the ValidationResults folder.
+      Labeling is complete. Your clips and log have been saved.
     </p>
     <div id="done-buttons">
-      {% if source == 'excel' %}
-        <button type="button" onclick="window.location.href='{{ url_for('pick_from_excel') }}'">
-          Label Another Video
+      {% if source == 'excel' or source == 'dataset' %}
+        <button type="button" onclick="window.location.href='{{ url_for('queue_page') }}'">
+          Return to Queue
         </button>
       {% endif %}
       <button type="button" onclick="window.location.href='{{ url_for('home_page') }}'">
-        Back to Home
+        Dashboard
       </button>
     </div>
   </div>
 
   <br>
   <button type="button" onclick="window.location.href='{{ url_for('home_page') }}'">
-    Back to Home
+    Dashboard
   </button>
-
-  <div class="page-footer">
-    Developed by Haider Baig 2025
-  </div>
 </div>
 
 <script>
@@ -150,12 +141,10 @@
 
           if (sessionSource === 'excel' || sessionSource === 'dataset') {
             doneMessage.textContent =
-              'The video has finished. Your labeled clips and log file are being saved. ' +
-              'This queue item has been marked labeled for the team.';
+              'Labeling is complete. This queue item has been saved and marked as labeled.';
           } else {
             doneMessage.textContent =
-              'The video has finished. Your labeled clips and log file are being saved ' +
-              'into the ValidationResults folder.';
+              'Labeling is complete. Your clips and log have been saved.';
           }
 
         } else {
