@@ -63,6 +63,14 @@ DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
 
 db = DBStore(str(DB_PATH))
 mqtt_mgr = MQTTManager()
+mqtt_mgr.configure(
+    enabled=True,
+    host="broker.hivemq.com",
+    port=1883,
+    topic_prefix="droneai-2026",
+    username="",
+    password=""
+)
 
 TEAM_PASSWORD = "droneai2025"
 
