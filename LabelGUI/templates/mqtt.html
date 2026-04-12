@@ -12,7 +12,7 @@
   <div class="topbar-inner">
     <div class="brand">
       <div class="brand__title">DroneAI</div>
-      <div class="brand__subtitle">MQTT Configuration + Live Team Feed</div>
+      <div class="brand__subtitle">MQTT Settings</div>
     </div>
     <div class="nav-actions">
       <a class="btn btn--ghost" href="/">Home</a>
@@ -26,7 +26,7 @@
   <div class="grid grid--2">
 
     <section class="card">
-      <h2>MQTT Configure</h2>
+      <h2>Connection Settings</h2>
 
       {% if message %}
         <p><b>{{ message }}</b></p>
@@ -47,10 +47,10 @@
         <label>Topic Prefix</label>
         <input name="topic_prefix" value="{{ cfg.topic_prefix }}" />
 
-        <label>Username (optional)</label>
+        <label>Username</label>
         <input name="username" value="{{ cfg.username }}" />
 
-        <label>Password (optional)</label>
+        <label>Password</label>
         <input name="password" type="password" value="{{ cfg.password }}" />
 
         <div class="actions actions--big">
@@ -60,7 +60,7 @@
         </div>
 
         <p class="muted">
-          Status:
+          Connection:
           {% if cfg.connected %}
             <b>Connected</b>
           {% else %}
@@ -71,8 +71,7 @@
     </section>
 
     <section class="card">
-      <h2>Live Team Activity</h2>
-      <p class="muted">Refreshes automatically.</p>
+      <h2>Activity Feed</h2>
       <div id="feed" style="display:flex; flex-direction:column; gap:10px;"></div>
     </section>
 
@@ -93,7 +92,7 @@ async function refreshFeed() {
       const div = document.createElement("div");
       div.className = "card";
       div.style.padding = "12px";
-      div.innerHTML = `<div class="muted">No MQTT activity yet.</div>`;
+      div.innerHTML = `<div class="muted">No activity yet.</div>`;
       feed.appendChild(div);
       return;
     }
