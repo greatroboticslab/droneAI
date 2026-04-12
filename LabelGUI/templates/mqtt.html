@@ -60,12 +60,16 @@
         </div>
 
         <p class="muted">
-          Connection:
-          {% if cfg.connected %}
-            <b>Connected</b>
-          {% else %}
-            <b>Disconnected</b>
-          {% endif %}
+          Connection: <b id="mqtt-connection-status">{% if cfg.connected %}Connected{% else %}Disconnected{% endif %}</b>
+        </p>
+
+        <p class="muted" style="margin-top:4px;">
+          Broker: <span id="mqtt-broker-host">{{ cfg.host or "-" }}</span> :
+          <span id="mqtt-broker-port">{{ cfg.port or "-" }}</span>
+        </p>
+
+        <p class="muted" style="margin-top:4px;">
+          Topic Prefix: <span id="mqtt-topic-prefix">{{ cfg.topic_prefix or "-" }}</span>
         </p>
       </form>
     </section>
@@ -79,11 +83,25 @@
 </main>
 
 <script>
-async function refreshFeed() {
+async function refreshMQTTPage() {
   try {
     const res = await fetch("/mqtt_status");
     const data = await res.json();
 
+    // Update live connection status
+    document.getElementById("mqtt-connection-status").textContent =
+      data.connected ? "Connected" : "Disconnected";
+
+    document.getElementById("mqtt-broker-host").textContent =
+      data.host || "-";
+
+    document.getElementById("mqtt-broker-port").textContent =
+      data.port || "-";
+
+    document.getElementById("mqtt-topic-prefix").textContent =
+      data.topic_prefix || "-";
+
+    // Update activity feed
     const feed = document.getElementById("feed");
     feed.innerHTML = "";
 
@@ -113,8 +131,8 @@ async function refreshFeed() {
   }
 }
 
-setInterval(refreshFeed, 1500);
-refreshFeed();
+setInterval(refreshMQTTPage, 1500);
+refreshMQTTPage();
 </script>
 
 </body>
