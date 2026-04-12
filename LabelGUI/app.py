@@ -826,6 +826,9 @@ def mqtt_status():
         "connected": mqtt_mgr.connected,
         "events": mqtt_mgr.events[-50:],
         "locks": mqtt_mgr.locks,
+        "host": mqtt_mgr.host,
+        "port": mqtt_mgr.port,
+        "topic_prefix": mqtt_mgr.topic_prefix,
     })
 
 @app.route("/")
