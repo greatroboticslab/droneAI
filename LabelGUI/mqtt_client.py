@@ -41,15 +41,25 @@ class MQTTManager:
             return False, "MQTT is disabled."
         if not self.host:
             return False, "MQTT host is empty."
-
+    
+        # Clean up any previous client first
+        if self._client:
+            try:
+                self._client.loop_stop()
+                self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+    
         self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
+    
         if self.username:
             self._client.username_pw_set(self.username, self.password)
-
+    
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
-
+    
         try:
             self._client.connect(self.host, self.port, keepalive=30)
             self._client.loop_start()
