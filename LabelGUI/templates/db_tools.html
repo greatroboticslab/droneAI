@@ -8,41 +8,41 @@
 </head>
 <body>
   <header class="topbar">
-  <div class="topbar-inner">
-    <div class="brand">
-      <div class="brand__title">DroneAI</div>
-      <div class="brand__subtitle">Database Tools — Shared Label Collaboration</div>
-    </div>
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand__title">DroneAI</div>
+        <div class="brand__subtitle">Database Tools</div>
+      </div>
 
-    <div class="nav-actions">
-      <a class="btn btn--ghost" href="/">Home</a>
-      <a class="btn btn--ghost" href="/crash_analysis">Crash Analysis</a>
+      <div class="nav-actions">
+        <a class="btn btn--ghost" href="/">Home</a>
+        <a class="btn btn--ghost" href="/crash_analysis">Crash Analysis</a>
+        <a class="btn btn--ghost" href="/logout">Logout</a>
+      </div>
     </div>
-  </div>
-</header>
+  </header>
 
   <main class="container">
     <div class="card">
       <h3>Export</h3>
-      <p class="muted">Download the current SQLite database file. Share it with another labeler.</p>
-      <a class="btn btn--primary" href="/db_download">Download db/droneai.sqlite</a>
+      <p class="muted">Download the current database.</p>
+      <a class="btn btn--primary" href="/db_download">Download Database</a>
 
       <div style="margin-top:12px;">
-        <p class="muted">Optional: export tables to Excel for reporting.</p>
-        <a class="btn btn--secondary" href="/db_export_excel">Export Excel (all tables)</a>
+        <p class="muted">Export tables to Excel.</p>
+        <a class="btn btn--secondary" href="/db_export_excel">Export Excel</a>
       </div>
     </div>
 
     <div class="card" style="margin-top:16px;">
-      <h3>Import (continue other people’s work)</h3>
+      <h3>Import Database</h3>
       <p class="muted">
-        Upload a previously labeled database. This will back up your current DB first, then replace it.
-        After import, everyone should label using the imported DB to avoid splitting the dataset.
+        Upload a previously exported database to continue shared work.
       </p>
 
       <form method="POST" action="/db_upload" enctype="multipart/form-data">
         <input type="file" name="db_file" accept=".sqlite,.db" required />
-        <button class="btn btn--primary" type="submit">Import DB</button>
+        <button class="btn btn--primary" type="submit">Import Database</button>
       </form>
 
       {% if message %}
@@ -51,11 +51,6 @@
       {% if error %}
         <p style="margin-top:10px; color:#ef4444;"><b>{{ error }}</b></p>
       {% endif %}
-    </div>
-
-    <div class="card" style="margin-top:16px;">
-      <h3>Logout</h3>
-      <a class="btn btn--ghost" href="/logout">Logout</a>
     </div>
   </main>
 </body>
