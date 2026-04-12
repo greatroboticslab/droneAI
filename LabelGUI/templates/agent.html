@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DroneAI Agent</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">Agent Setup + System Health</div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Dashboard</a>
+      <a class="btn btn--ghost" href="/queue">Shared Queue</a>
+      <a class="btn btn--ghost" href="/logout">Logout</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  {% if message %}
+    <div class="card" style="margin-bottom:16px;">
+      <b>{{ message }}</b>
+    </div>
+  {% endif %}
+
+  {% if error %}
+    <div class="card" style="margin-bottom:16px; border-color:#ef4444;">
+      <b style="color:#ef4444;">{{ error }}</b>
+    </div>
+  {% endif %}
+
+  <div class="grid grid--2">
+
+    <section class="card">
+      <h2>Agent Actions</h2>
+      <p class="muted">
+        This is the first agent version. It helps with setup and health checking without replacing the current app workflow.
+      </p>
+
+      <form method="POST" action="/agent">
+        <input type="hidden" name="action" value="install_mqtt">
+        <div class="actions actions--big">
+          <button class="btn btn--primary" type="submit">Install MQTT Package</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>System Health</h2>
+
+      <table>
+        <tbody>
+          <tr>
+            <th>MQTT Package Installed</th>
+            <td>
+              {% if status.mqtt_package_installed %}
+                <span class="chip chip--ok">Yes</span>
+              {% else %}
+                <span class="chip chip--no">No</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Database Exists</th>
+            <td>
+              {% if status.db_exists %}
+                <span class="chip chip--ok">Yes</span>
+              {% else %}
+                <span class="chip chip--no">No</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Database Size</th>
+            <td>{{ status.db_size_bytes }} bytes</td>
+          </tr>
+          <tr>
+            <th>MQTT Enabled</th>
+            <td>
+              {% if status.mqtt_enabled %}
+                <span class="chip chip--ok">Yes</span>
+              {% else %}
+                <span class="chip chip--no">No</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>MQTT Connected</th>
+            <td>
+              {% if status.mqtt_connected %}
+                <span class="chip chip--ok">Yes</span>
+              {% else %}
+                <span class="chip chip--no">No</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>MQTT Host</th>
+            <td>{{ status.mqtt_host or "-" }}</td>
+          </tr>
+          <tr>
+            <th>MQTT Port</th>
+            <td>{{ status.mqtt_port or "-" }}</td>
+          </tr>
+          <tr>
+            <th>Topic Prefix</th>
+            <td>{{ status.mqtt_topic_prefix or "-" }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+</main>
+
+</body>
+</html>
