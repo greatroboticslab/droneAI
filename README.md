@@ -2,7 +2,7 @@
 
 **DroneAI** is a local web-based GUI for labeling drone flight videos. It helps users upload a video dataset, label flight events, track progress, create training data, and review crash results through a browser-based interface.
 
-This version is focused on the **local application workflow**.
+This first version is focused on the **local application workflow**.
 
 ---
 
@@ -98,7 +98,7 @@ droneai2025
 Choose a role:
 
 - **Leader** — can upload and manage datasets
-- **Team Member** — can label videos from the queue
+- **Team Member** — can label videos from the queue (If you want to label videos, just log in as team member)
 
 ---
 
