@@ -22,7 +22,6 @@ The Excel file should include columns for:
 - `Persona Name`
 - `Youtube Link`
 
-Some alternate names may also work depending on the current parser, but these two are the safest.
 
 ---
 
