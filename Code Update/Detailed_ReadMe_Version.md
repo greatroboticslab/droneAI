@@ -362,4 +362,4 @@ This version of DroneAI supports:
 - crash review
 - database export/import
 
-The current focus is to provide a stable local labeling workflow before adding stronger synchronization and future agent-based features.
+Next version update will add stronger synchronization with mqtt and agent-based features.
