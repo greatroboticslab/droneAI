@@ -75,10 +75,19 @@
                   <option value="Simulation">Simulation</option>
                   <option value="Real flight">Real flight</option>
                 </select>
+              
+                <label>Output Folder</label>
+                <input
+                  name="output_folder_name"
+                  placeholder="Enter_Folder_Name"
+                  value="{{ item.person_name|replace(' ', '_')|replace('|', '_') }}"
+                >
+              
                 <label style="display:flex; gap:8px; align-items:center; margin-top:8px;">
                   <input type="checkbox" name="delete_original" style="width:auto;">
                   Delete original
                 </label>
+              
                 <button class="btn btn--primary" type="submit" style="margin-top:8px;">Start</button>
               </form>
               {% else %}
