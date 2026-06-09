@@ -68,28 +68,42 @@
             <td>{{ item.labeled_by or '-' }}</td>
             <td>{{ item.locked_by or '-' }}</td>
             <td>
-              {% if item.status == 'not_labeled' or item.locked_by == username %}
-              <form method="POST" action="/queue/start/{{ item.item_key }}">
-                <label>Scenario</label>
-                <select name="scenario_type">
-                  <option value="Simulation">Simulation</option>
-                  <option value="Real flight">Real flight</option>
-                </select>
-              
-                <label>Output Folder</label>
-                <input
-                  name="output_folder_name"
-                  placeholder="Enter_Folder_Name"
-                  value="{{ item.person_name|replace(' ', '_')|replace('|', '_') }}"
-                >
-              
-                <label style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-                  <input type="checkbox" name="delete_original" style="width:auto;">
-                  Delete original
-                </label>
-              
-                <button class="btn btn--primary" type="submit" style="margin-top:8px;">Start</button>
-              </form>
+              {% if not item.locked_by or item.locked_by == username %}
+                <form method="POST" action="/queue/start/{{ item.item_key }}">
+                  <label>Scenario</label>
+                  <select name="scenario_type">
+                    <option value="Simulation">Simulation</option>
+                    <option value="Real flight">Real flight</option>
+                  </select>
+            
+                  <label>Output Folder</label>
+                  <input
+                    name="output_folder_name"
+                    placeholder="Example: Ashleigh_Trial_1"
+                    value="{{ item.person_name|replace(' ', '_')|replace('|', '_') }}"
+                  >
+            
+                  <label style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                    <input type="checkbox" name="delete_original" style="width:auto;">
+                    Delete original
+                  </label>
+            
+                  <button class="btn btn--primary" type="submit" style="margin-top:8px;">
+                    {% if item.status == 'labeled' %}
+                      Relabel
+                    {% elif item.status == 'in_progress' %}
+                      Resume
+                    {% else %}
+                      Start
+                    {% endif %}
+                  </button>
+                </form>
+            
+                {% if item.status == 'labeled' or item.status == 'in_progress' %}
+                  <form method="POST" action="/queue/reset/{{ item.item_key }}" style="margin-top:8px;">
+                    <button class="btn btn--secondary" type="submit">Reset</button>
+                  </form>
+                {% endif %}
               {% else %}
                 <span class="muted">Locked</span>
               {% endif %}
