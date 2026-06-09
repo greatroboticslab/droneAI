@@ -203,8 +203,9 @@ def handle_mqtt_event(data: dict):
             db.update_dataset_item(
                 item_key=item_key,
                 status="in_progress",
-                locked_by=data.get("by", ""),
-                scenario_type=data.get("scenario_type", ""),
+                labeled_by="",
+                locked_by=current_user,
+                scenario_type=scenario_type,
             )
 
     elif event_type == "item_labeled":
@@ -1029,6 +1030,38 @@ def queue_start_item(item_key):
     })
 
     return redirect(url_for("validation_view_stream", source="dataset"))
+
+@app.route("/queue/reset/<item_key>", methods=["POST"])
+@login_required
+def queue_reset_item(item_key):
+    item = db.get_dataset_item(item_key)
+
+    if not item:
+        return "Item not found.", 404
+
+    current_user = session.get("user", "unknown")
+
+    # Do not allow resetting something currently locked by another user
+    if item["locked_by"] and item["locked_by"] != current_user:
+        return f"This video is currently locked by {item['locked_by']}.", 400
+
+    db.update_dataset_item(
+        item_key=item_key,
+        status="not_labeled",
+        labeled_by="",
+        locked_by="",
+        scenario_type="",
+    )
+
+    mqtt_mgr.publish_event("item_reset", {
+        "item_key": item_key,
+        "dataset_key": item["dataset_key"],
+        "by": current_user,
+    })
+
+    mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "released")
+
+    return redirect(url_for("queue_page", dataset_key=item["dataset_key"]))
 
 @app.route("/validation_release_lock", methods=["POST"])
 @login_required
