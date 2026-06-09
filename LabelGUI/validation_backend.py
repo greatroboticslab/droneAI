@@ -449,13 +449,12 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
 
             fps = cap.get(cv2.CAP_PROP_FPS) or fps_hint or 30.0
             event_frame = int(ctime * fps)
-
-            # 15 frames before and 15 frames after event
-            frame_window = 15
-
-            start_frame = max(0, event_frame - frame_window)
-            end_frame = event_frame + frame_window
-
+            
+            clip_before_sec = 2.0
+            clip_after_sec = 1.0
+            
+            start_frame = max(0, event_frame - int(clip_before_sec * fps))
+            end_frame = event_frame + int(clip_after_sec * fps)
             approx_start = sec_to_hms(start_frame / fps)
             approx_end = sec_to_hms(end_frame / fps)
 
