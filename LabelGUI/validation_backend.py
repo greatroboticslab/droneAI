@@ -66,10 +66,11 @@ def start_validation_thread(
     scenario_base=None  # "Simulation" or "Real flight"
 ):
     """
-    If person_name & scenario_base provided:
-        ValidationResults/<first 4 chars>/<scenario_base N>/
-    Else:
-        ValidationResults/<unique folder_name>/
+    Saves each validation session directly under:
+
+        LabelGUI/ValidationResults/<folder_name>/
+
+    No nested person/scenario folders are created.
     """
     global _processing_thread, _video_done, _log_file_path
     global _delete_original, _event_times, _video_duration, _current_video_file
@@ -86,27 +87,31 @@ def start_validation_thread(
     _last_youtube_link = (youtube_link or "").strip()
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
+
     youtube_downloads_dir = os.path.join(base_dir, "YouTubeDownloads")
     os.makedirs(youtube_downloads_dir, exist_ok=True)
 
     results_dir = os.path.join(base_dir, "ValidationResults")
     os.makedirs(results_dir, exist_ok=True)
 
-    # Build target folder
-    if person_name and scenario_base:
-        prefix = (person_name or "").strip()[:4] or "User"
-        person_dir = os.path.join(results_dir, prefix)
-        os.makedirs(person_dir, exist_ok=True)
+    # ------------------------------------------------------------
+    # Clean flat output folder:
+    # ValidationResults/<folder_name>/
+    # ------------------------------------------------------------
+    folder_name = (folder_name or "").strip()
 
-        existing = [d for d in os.listdir(person_dir) if os.path.isdir(os.path.join(person_dir, d))]
-        count = sum(1 for d in existing if d.lower().startswith((scenario_base or "").lower()))
-        scenario_dir_name = f"{scenario_base} {count + 1}"
-        target_folder = os.path.join(person_dir, scenario_dir_name)
-        os.makedirs(target_folder, exist_ok=True)
-    else:
-        folder_name = folder_name or "Session"
-        target_folder = get_unique_folder_name(results_dir, folder_name)
-        os.makedirs(target_folder, exist_ok=True)
+    if not folder_name:
+        if person_name:
+            folder_name = person_name
+        else:
+            folder_name = "Session"
+
+    folder_name = sanitize_folder_name(folder_name)
+    target_folder = get_unique_folder_name(results_dir, folder_name)
+    os.makedirs(target_folder, exist_ok=True)
+
+    clips_folder = os.path.join(target_folder, "clips")
+    os.makedirs(clips_folder, exist_ok=True)
 
     _target_folder = target_folder
     _log_file_path = os.path.join(target_folder, "event_log.txt")
@@ -126,15 +131,37 @@ def start_validation_thread(
         events_count=0,
     )
 
-    # Download
+    # Save metadata early
+    metadata_path = os.path.join(target_folder, "metadata.json")
+    metadata = {
+        "sid": _validation_sid,
+        "folder_name": os.path.basename(target_folder),
+        "person_name": person_name or "",
+        "scenario_base": scenario_base or "",
+        "youtube_link": _last_youtube_link,
+        "created_at": datetime.utcnow().isoformat(),
+        "status": "running",
+    }
+
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
+    # Download video
     downloaded_filepath = download_video(youtube_link, youtube_downloads_dir)
     _current_video_file = downloaded_filepath
 
     if not downloaded_filepath:
         _video_done = True
         db.finalize_validation_session(_validation_sid, 0.0, 0, status="failed")
+
         with open(_log_file_path, "w", encoding="utf-8") as f:
             f.write("Download failed.\n")
+
+        metadata["status"] = "failed"
+        metadata["finished_at"] = datetime.utcnow().isoformat()
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
         return
 
     # Update DB with video_path now that we have it
@@ -145,6 +172,73 @@ def start_validation_thread(
         status="running",
     )
 
+    def video_thread():
+        nonlocal downloaded_filepath, target_folder, clips_folder, youtube_link, base_dir, metadata_path, metadata
+
+        with open(_log_file_path, "w", encoding="utf-8") as f:
+            f.write(f"YouTube Link: {youtube_link}\n")
+            f.write(f"Output Folder: {os.path.relpath(target_folder, base_dir)}\n")
+            f.write(f"Clips Folder: {os.path.relpath(clips_folder, base_dir)}\n")
+            f.write(f"Person: {person_name or ''}\n")
+            f.write(f"Scenario: {scenario_base or ''}\n\n")
+
+        # Wait until user finishes watching/marking OR stream ends
+        while not _video_done:
+            time.sleep(0.5)
+
+        # Extract clips after marking ends
+        cap_for_fps = cv2.VideoCapture(downloaded_filepath)
+        fps = (cap_for_fps.get(cv2.CAP_PROP_FPS) or 30.0) if cap_for_fps.isOpened() else 30.0
+        cap_for_fps.release()
+
+        multiple_pass_extract(downloaded_filepath, target_folder, _event_times, fps)
+
+        # Optionally delete original downloaded video
+        if _delete_original and os.path.exists(downloaded_filepath):
+            try:
+                os.remove(downloaded_filepath)
+            except Exception:
+                pass
+
+        # Log summary
+        with open(_log_file_path, "a", encoding="utf-8") as f:
+            f.write(f"\nTotal Events Observed: {len(_event_times)}\n")
+
+        # Update progress.json
+        try:
+            update_progress_record(
+                person_name=person_name,
+                youtube_link=youtube_link,
+                scenario_base=scenario_base,
+                target_folder=target_folder,
+                events_count=len(_event_times),
+            )
+        except Exception:
+            pass
+
+        # Finalize DB session
+        db.finalize_validation_session(
+            _validation_sid,
+            duration_sec=float(_video_duration or 0.0),
+            events_count=int(len(_event_times)),
+            status="final"
+        )
+
+        # Finalize metadata
+        metadata["status"] = "final"
+        metadata["finished_at"] = datetime.utcnow().isoformat()
+        metadata["events_count"] = int(len(_event_times))
+        metadata["duration_sec"] = float(_video_duration or 0.0)
+
+        with open(metadata_path, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        finalize_video(target_folder)
+
+    _processing_thread = threading.Thread(target=video_thread, daemon=True)
+    _processing_thread.start()
+
+    
     def video_thread():
         nonlocal downloaded_filepath, target_folder, youtube_link, base_dir
 
@@ -340,6 +434,9 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
     _extraction_current = 0
     _extraction_total = len(sorted_times)
 
+    clips_folder = os.path.join(target_folder, "clips")
+    os.makedirs(clips_folder, exist_ok=True)
+
     excel_rows = []
 
     with open(_log_file_path, "a", encoding="utf-8") as lf:
@@ -352,18 +449,28 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
 
             fps = cap.get(cv2.CAP_PROP_FPS) or fps_hint or 30.0
             event_frame = int(ctime * fps)
+
+            # 15 frames before and 15 frames after event
             frame_window = 15
 
             start_frame = max(0, event_frame - frame_window)
             end_frame = event_frame + frame_window
 
+            approx_start = sec_to_hms(start_frame / fps)
+            approx_end = sec_to_hms(end_frame / fps)
+
             lf.write(
-                f"{event_type.capitalize()} #{idx}: [Frames {start_frame}-{end_frame}] "
-                f"(~{sec_to_hms(start_frame/fps)} - ~{sec_to_hms(end_frame/fps)})\n"
+                f"{event_type} #{idx}: "
+                f"event_time={round(ctime, 3)} sec, "
+                f"frames={start_frame}-{end_frame}, "
+                f"time={approx_start}-{approx_end}\n"
             )
 
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-            out_filename = os.path.join(target_folder, f"{event_type}_{idx:02d}.mp4")
+
+            clip_filename = f"{idx:03d}_{event_type}.mp4"
+            out_filename = os.path.join(clips_folder, clip_filename)
+
             writer = None
 
             while True:
@@ -380,39 +487,52 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
                     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                     writer = cv2.VideoWriter(out_filename, fourcc, fps, (w, h))
 
-                overlay_text = f"{event_type.capitalize()} #{idx}, Frame={current_frame_idx}"
+                overlay_text = f"{event_type} #{idx}, Frame={current_frame_idx}"
                 frame_copy = frame.copy()
-                cv2.putText(frame_copy, overlay_text, (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+                cv2.putText(
+                    frame_copy,
+                    overlay_text,
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    (0, 0, 255),
+                    2,
+                )
                 writer.write(frame_copy)
 
             if writer:
                 writer.release()
+
             cap.release()
 
             excel_rows.append({
-                "Event index": idx,
-                "Event type": event_type,
-                "Event time (sec)": round(ctime, 3),
-                "Event time (hh:mm:ss)": sec_to_hms(ctime),
-                "Start frame": start_frame,
-                "End frame": end_frame,
-                "Approx start time": sec_to_hms(start_frame / fps),
-                "Approx end time": sec_to_hms(end_frame / fps),
-                "Clip filename": os.path.basename(out_filename),
+                "event_index": idx,
+                "event_type": event_type,
+                "event_time_sec": round(ctime, 3),
+                "event_time_hms": sec_to_hms(ctime),
+                "start_frame": start_frame,
+                "end_frame": end_frame,
+                "approx_start_time": approx_start,
+                "approx_end_time": approx_end,
+                "clip_filename": clip_filename,
+                "clip_path": os.path.join("clips", clip_filename),
             })
 
     _extraction_in_progress = False
 
     if excel_rows:
-        base_title = os.path.splitext(os.path.basename(video_path))[0]
-        excel_name = f"{base_title}_labels.xlsx"
-        excel_path = os.path.join(target_folder, excel_name)
+        # Save CSV
+        csv_path = os.path.join(target_folder, "events.csv")
+
+        # Save Excel
+        excel_path = os.path.join(target_folder, "labels.xlsx")
+
         try:
             df = pd.DataFrame(excel_rows)
+            df.to_csv(csv_path, index=False)
             df.to_excel(excel_path, index=False)
         except Exception as e:
-            print("[multiple_pass_extract] Failed to write Excel file:", e)
+            print("[multiple_pass_extract] Failed to write label files:", e)
 
 
 # -----------------------
@@ -432,6 +552,29 @@ def get_unique_folder_name(parent_dir, base_name):
         if not os.path.exists(new_candidate):
             return new_candidate
         counter += 1
+
+def sanitize_folder_name(name: str) -> str:
+    """
+    Makes a safe Windows-friendly folder name.
+    """
+    name = (name or "").strip()
+
+    # Replace invalid Windows folder characters
+    name = re.sub(r'[<>:"/\\|?*]+', "_", name)
+
+    # Replace whitespace with underscore
+    name = re.sub(r"\s+", "_", name)
+
+    # Remove repeated underscores
+    name = re.sub(r"_+", "_", name)
+
+    # Remove leading/trailing dots, underscores, and spaces
+    name = name.strip("._ ")
+
+    if not name:
+        name = datetime.utcnow().strftime("Session_%Y%m%d_%H%M%S")
+
+    return name
 
 
 # -----------------------
