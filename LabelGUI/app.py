@@ -7,6 +7,7 @@ import io
 import zipfile
 import base64
 import uuid
+import re
 
 from datetime import datetime
 from functools import wraps
@@ -225,6 +226,26 @@ def handle_mqtt_event(data: dict):
                 status=data.get("status", "not_labeled"),
                 locked_by="",
             )
+
+def clean_folder_name(name):
+    name = (name or "").strip()
+
+    # Replace characters that Windows does not allow in folder names
+    name = re.sub(r'[<>:"/\\|?*]+', "_", name)
+
+    # Replace spaces with underscores
+    name = re.sub(r"\s+", "_", name)
+
+    # Remove repeated underscores
+    name = re.sub(r"_+", "_", name)
+
+    # Avoid empty or weird names
+    name = name.strip("._ ")
+
+    if not name:
+        name = datetime.now().strftime("session_%Y%m%d_%H%M%S")
+
+    return name
 
 mqtt_mgr.message_handler = handle_mqtt_event
     
@@ -964,6 +985,13 @@ def queue_start_item(item_key):
     scenario_type = request.form.get("scenario_type", "Simulation")
     delete_original = True if request.form.get("delete_original") == "on" else False
 
+    output_folder_name = request.form.get("output_folder_name", "").strip()
+
+    if not output_folder_name:
+        output_folder_name = f"{item['row_index']:03d}_{item['person_name']}"
+
+    output_folder_name = clean_folder_name(output_folder_name)
+
     db.update_dataset_item(
         item_key=item_key,
         status="in_progress",
@@ -985,12 +1013,12 @@ def queue_start_item(item_key):
     session["current_scenario_type"] = scenario_type
 
     start_validation_thread(
-        youtube_link=item["youtube_link"],
-        folder_name=None,
-        delete_original=delete_original,
-        person_name=item["person_name"],
-        scenario_base=scenario_type,
-    )
+    youtube_link=item["youtube_link"],
+    folder_name=output_folder_name,
+    delete_original=delete_original,
+    person_name=item["person_name"],
+    scenario_base=scenario_type,
+)
 
     mqtt_mgr.publish_event("validation_started", {
         "by": current_user,
