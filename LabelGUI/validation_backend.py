@@ -486,17 +486,6 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint)
                     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                     writer = cv2.VideoWriter(out_filename, fourcc, fps, (w, h))
 
-                overlay_text = f"{event_type} #{idx}, Frame={current_frame_idx}"
-                frame_copy = frame.copy()
-                cv2.putText(
-                    frame_copy,
-                    overlay_text,
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 0, 255),
-                    2,
-                )
                 writer.write(frame_copy)
 
             if writer:
