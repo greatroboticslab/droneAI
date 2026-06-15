@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Frame Extraction</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">Frame Extraction</div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Dashboard</a>
+      <a class="btn btn--ghost" href="/queue">Shared Queue</a>
+      <a class="btn btn--ghost" href="/training_index">Training</a>
+      <a class="btn btn--ghost" href="/logout">Logout</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  {% if message %}
+    <div class="card" style="margin-bottom:16px;">
+      <b>{{ message }}</b>
+    </div>
+  {% endif %}
+
+  {% if error %}
+    <div class="card" style="margin-bottom:16px; border-color:#ef4444;">
+      <b style="color:#ef4444;">{{ error }}</b>
+    </div>
+  {% endif %}
+
+  <div class="grid grid--2">
+
+    <section class="card">
+      <h2>Select Session</h2>
+
+      {% if sessions %}
+        <form method="GET" action="/frame_extraction">
+          <label>Validation Session</label>
+          <select name="session" onchange="this.form.submit()">
+            <option value="">Choose a session</option>
+            {% for s in sessions %}
+              <option value="{{ s.name }}" {% if selected_session == s.name %}selected{% endif %}>
+                {{ s.name }} — {{ s.clip_count }} clips
+              </option>
+            {% endfor %}
+          </select>
+        </form>
+
+        {% if selected_session %}
+          <form method="POST" action="/frame_extraction" style="margin-top:18px;">
+            <input type="hidden" name="action" value="extract">
+            <input type="hidden" name="session_name" value="{{ selected_session }}">
+
+            <label>Extraction FPS</label>
+            <input name="sample_fps" value="5">
+
+            <div class="actions actions--big">
+              <button class="btn btn--primary" type="submit">Extract Frames</button>
+            </div>
+          </form>
+        {% endif %}
+      {% else %}
+        <p class="muted">No labeled sessions found.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Clips</h2>
+
+      {% if clips %}
+        <table>
+          <thead>
+            <tr>
+              <th>Clip</th>
+              <th>Label</th>
+              <th>Duration</th>
+              <th>Frames</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in clips %}
+              <tr>
+                <td>{{ c.filename }}</td>
+                <td><span class="chip">{{ c.label }}</span></td>
+                <td>{{ c.duration_sec }} sec</td>
+                <td>{{ c.frame_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">Select a session to view clips.</p>
+      {% endif %}
+    </section>
+
+  </div>
+
+  {% if summary %}
+    <div class="card" style="margin-top:18px;">
+      <h2>Extraction Summary</h2>
+
+      <p><b>Session:</b> {{ summary.session_name }}</p>
+      <p><b>Frames Saved:</b> {{ summary.total_frames_saved }}</p>
+      <p><b>Clips Processed:</b> {{ summary.clips_processed }}</p>
+      <p><b>Output Folder:</b> {{ summary.output_dir }}</p>
+
+      <h3>Labels</h3>
+      <div class="actions">
+        {% for label, count in summary.label_counts.items() %}
+          <span class="chip">{{ label }}: {{ count }}</span>
+        {% endfor %}
+      </div>
+
+      {% if summary.preview_images %}
+        <h3 style="margin-top:18px;">Preview</h3>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:12px;">
+          {% for img in summary.preview_images %}
+            <div class="card" style="padding:8px;">
+              <img
+                src="{{ url_for('frame_dataset_image', path=img.path) }}"
+                style="width:100%; height:110px; object-fit:cover; border-radius:8px;"
+              >
+              <p class="muted" style="margin-top:6px;">{{ img.label }}</p>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+</main>
+
+</body>
+</html>
