@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session, send_file
 from agent_tools import overall_agent_status, install_package, mqtt_package_status
+from vit_results_backend import list_vit_runs, load_vit_run
 from frame_extraction_backend import (
     list_validation_sessions,
     get_session_clips,
