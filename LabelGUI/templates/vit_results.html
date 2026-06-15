@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ViT Results</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">ViT Results</div>
+    </div>
+
+    <div class="nav-actions">
+      <a class="btn btn--ghost" href="/">Dashboard</a>
+      <a class="btn btn--ghost" href="/frame_extraction">Frame Extraction</a>
+      <a class="btn btn--ghost" href="/queue">Shared Queue</a>
+      <a class="btn btn--ghost" href="/logout">Logout</a>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  {% if error %}
+    <section class="card" style="margin-bottom:16px; border-color:#ef4444;">
+      <b style="color:#ef4444;">{{ error }}</b>
+    </section>
+  {% endif %}
+
+  <section class="card" style="margin-bottom:18px;">
+    <h2>Select ViT Run</h2>
+
+    {% if runs %}
+      <form method="GET" action="/vit_results">
+        <label>Training Run</label>
+        <select name="run" onchange="this.form.submit()">
+          {% for r in runs %}
+            <option value="{{ r.name }}" {% if selected_run == r.name %}selected{% endif %}>
+              {{ r.name }}
+              {% if r.final_val_acc is not none %}
+                — {{ "%.2f"|format(r.final_val_acc * 100) }}%
+              {% endif %}
+            </option>
+          {% endfor %}
+        </select>
+
+        <input type="hidden" name="view" value="{{ view_filter }}">
+      </form>
+    {% else %}
+      <p class="muted">No ViT result folders found yet.</p>
+    {% endif %}
+  </section>
+
+  {% if run_data %}
+
+    <div class="grid grid--2">
+
+      <section class="card">
+        <h2>Run Summary</h2>
+
+        <p><b>Run:</b> {{ run_data.summary.run_name }}</p>
+        <p><b>Created:</b> {{ run_data.summary.created_at }}</p>
+        <p><b>Device:</b> {{ run_data.summary.device }}</p>
+
+        <div class="stats-grid" style="margin-top:14px;">
+          <div class="stat">
+            <div class="stat__value">{{ run_data.summary.total_images }}</div>
+            <div class="stat__label">Total Images</div>
+          </div>
+
+          <div class="stat">
+            <div class="stat__value">{{ run_data.summary.train_images }}</div>
+            <div class="stat__label">Training Images</div>
+          </div>
+
+          <div class="stat">
+            <div class="stat__value">{{ run_data.summary.val_images }}</div>
+            <div class="stat__label">Validation Images</div>
+          </div>
+
+          <div class="stat">
+            {% if run_data.summary.final_val_acc is not none %}
+              <div class="stat__value">{{ "%.2f"|format(run_data.summary.final_val_acc * 100) }}%</div>
+            {% else %}
+              <div class="stat__value">N/A</div>
+            {% endif %}
+            <div class="stat__label">Validation Accuracy</div>
+          </div>
+        </div>
+
+        {% if run_data.summary.note %}
+          <p class="muted" style="margin-top:14px;">{{ run_data.summary.note }}</p>
+        {% endif %}
+      </section>
+
+      <section class="card">
+        <h2>Label Counts</h2>
+
+        {% if run_data.label_counts %}
+          <table>
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>Images</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in run_data.label_counts %}
+                <tr>
+                  <td><span class="chip">{{ row.label }}</span></td>
+                  <td>{{ row.count }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="muted">No label counts found.</p>
+        {% endif %}
+      </section>
+
+    </div>
+
+    <section class="card" style="margin-top:18px;">
+      <h2>Training History</h2>
+
+      {% if run_data.history %}
+        <table>
+          <thead>
+            <tr>
+              <th>Epoch</th>
+              <th>Train Loss</th>
+              <th>Train Accuracy</th>
+              <th>Validation Loss</th>
+              <th>Validation Accuracy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in run_data.history %}
+              <tr>
+                <td>{{ row.epoch }}</td>
+                <td>{{ row.train_loss }}</td>
+                <td>{{ "%.2f"|format(row.train_acc * 100) }}%</td>
+                <td>{{ row.val_loss }}</td>
+                <td>{{ "%.2f"|format(row.val_acc * 100) }}%</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No training history found.</p>
+      {% endif %}
+    </section>
+
+    <section class="card" style="margin-top:18px;">
+      <h2>Confusion Matrix</h2>
+
+      {% if run_data.confusion.columns %}
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>True \ Predicted</th>
+                {% for col in run_data.confusion.columns %}
+                  <th>{{ col }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+
+            <tbody>
+              {% for row in run_data.confusion.rows %}
+                <tr>
+                  <th>{{ row.label }}</th>
+                  {% for value in row.values %}
+                    <td>{{ value }}</td>
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="muted">No confusion matrix found.</p>
+      {% endif %}
+    </section>
+
+    <section class="card" style="margin-top:18px;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap;">
+        <h2>Prediction Samples</h2>
+
+        <div class="actions">
+          <a class="btn btn--ghost" href="/vit_results?run={{ selected_run }}&view=all">All</a>
+          <a class="btn btn--ghost" href="/vit_results?run={{ selected_run }}&view=correct">Correct</a>
+          <a class="btn btn--ghost" href="/vit_results?run={{ selected_run }}&view=wrong">Wrong</a>
+        </div>
+      </div>
+
+      <p class="muted">Showing up to 60 validation prediction samples.</p>
+
+      {% if run_data.predictions %}
+        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap:14px; margin-top:14px;">
+          {% for p in run_data.predictions %}
+            <div class="card" style="padding:10px;">
+              <img
+                src="{{ url_for('frame_dataset_image', path=p.image_path) }}"
+                style="width:100%; height:130px; object-fit:cover; border-radius:8px;"
+              >
+
+              <p style="margin-top:8px;">
+                <b>True:</b> {{ p.true_label }}<br>
+                <b>Pred:</b> {{ p.predicted_label }}<br>
+                <b>Conf:</b> {{ p.confidence }}
+              </p>
+
+              {% if p.correct %}
+                <span class="chip chip--ok">Correct</span>
+              {% else %}
+                <span class="chip chip--bad">Wrong</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No prediction samples found.</p>
+      {% endif %}
+    </section>
+
+  {% endif %}
+
+</main>
+
+</body>
+</html>
