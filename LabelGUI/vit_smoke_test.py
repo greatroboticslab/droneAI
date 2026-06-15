@@ -1,0 +1,412 @@
+import argparse
+import json
+import random
+from pathlib import Path
+from datetime import datetime
+
+import pandas as pd
+from PIL import Image
+
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+
+from torchvision import transforms
+from torchvision.models import vit_b_16, ViT_B_16_Weights
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+
+# ------------------------------------------------------------
+# Paths
+# ------------------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+FRAME_DATASET_DIR = BASE_DIR / "FrameDataset"
+MANIFEST_PATH = FRAME_DATASET_DIR / "frame_manifest.csv"
+
+RESULTS_DIR = BASE_DIR / "ViTResults"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ------------------------------------------------------------
+# Reproducibility
+# ------------------------------------------------------------
+def set_seed(seed=42):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+# ------------------------------------------------------------
+# Dataset
+# ------------------------------------------------------------
+class FrameDataset(Dataset):
+    def __init__(self, dataframe, label_to_idx, transform=None):
+        self.df = dataframe.reset_index(drop=True)
+        self.label_to_idx = label_to_idx
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+
+        image_path = FRAME_DATASET_DIR / row["image_path"]
+        label_name = row["label"]
+        label_idx = self.label_to_idx[label_name]
+
+        image = Image.open(image_path).convert("RGB")
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label_idx, str(row["image_path"])
+
+
+# ------------------------------------------------------------
+# Load manifest
+# ------------------------------------------------------------
+def load_manifest():
+    if not MANIFEST_PATH.exists():
+        raise FileNotFoundError(
+            f"Could not find {MANIFEST_PATH}. Run Frame Extraction first."
+        )
+
+    df = pd.read_csv(MANIFEST_PATH)
+
+    required_cols = {"image_path", "label", "session_name", "clip_filename"}
+    missing = required_cols - set(df.columns)
+
+    if missing:
+        raise ValueError(f"Manifest is missing columns: {missing}")
+
+    # Remove rows where image file does not exist
+    existing_rows = []
+    for _, row in df.iterrows():
+        image_path = FRAME_DATASET_DIR / row["image_path"]
+        if image_path.exists():
+            existing_rows.append(row)
+
+    df = pd.DataFrame(existing_rows)
+
+    if df.empty:
+        raise ValueError("No valid images found in FrameDataset.")
+
+    df["label"] = df["label"].astype(str)
+
+    return df
+
+
+# ------------------------------------------------------------
+# Model
+# ------------------------------------------------------------
+def build_model(num_classes, use_pretrained=True):
+    """
+    Loads ViT-B/16 and replaces the final classification layer.
+    For this smoke test, we freeze the backbone and train only the head.
+    """
+
+    weights = None
+
+    if use_pretrained:
+        try:
+            weights = ViT_B_16_Weights.DEFAULT
+            model = vit_b_16(weights=weights)
+            print("[INFO] Loaded pretrained ViT weights.")
+        except Exception as e:
+            print("[WARNING] Could not load pretrained weights.")
+            print("[WARNING] Reason:", e)
+            print("[WARNING] Continuing with random weights. Results will not be meaningful.")
+            model = vit_b_16(weights=None)
+    else:
+        model = vit_b_16(weights=None)
+
+    in_features = model.heads.head.in_features
+    model.heads.head = nn.Linear(in_features, num_classes)
+
+    # Freeze backbone for quick smoke test
+    for name, param in model.named_parameters():
+        param.requires_grad = False
+
+    # Train only classification head
+    for param in model.heads.parameters():
+        param.requires_grad = True
+
+    if weights is not None:
+        transform = weights.transforms()
+    else:
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ])
+
+    return model, transform
+
+
+# ------------------------------------------------------------
+# Training / Evaluation
+# ------------------------------------------------------------
+def train_one_epoch(model, loader, criterion, optimizer, device):
+    model.train()
+
+    total_loss = 0.0
+    all_preds = []
+    all_labels = []
+
+    for images, labels, _paths in loader:
+        images = images.to(device)
+        labels = labels.to(device)
+
+        optimizer.zero_grad()
+
+        outputs = model(images)
+        loss = criterion(outputs, labels)
+
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item() * images.size(0)
+
+        preds = outputs.argmax(dim=1)
+        all_preds.extend(preds.detach().cpu().numpy().tolist())
+        all_labels.extend(labels.detach().cpu().numpy().tolist())
+
+    avg_loss = total_loss / len(loader.dataset)
+    acc = accuracy_score(all_labels, all_preds)
+
+    return avg_loss, acc
+
+
+def evaluate(model, loader, criterion, device, idx_to_label):
+    model.eval()
+
+    total_loss = 0.0
+    all_preds = []
+    all_labels = []
+    all_paths = []
+    all_confidences = []
+
+    with torch.no_grad():
+        for images, labels, paths in loader:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            probs = torch.softmax(outputs, dim=1)
+            confidences, preds = probs.max(dim=1)
+
+            total_loss += loss.item() * images.size(0)
+
+            all_preds.extend(preds.detach().cpu().numpy().tolist())
+            all_labels.extend(labels.detach().cpu().numpy().tolist())
+            all_confidences.extend(confidences.detach().cpu().numpy().tolist())
+            all_paths.extend(paths)
+
+    avg_loss = total_loss / len(loader.dataset)
+    acc = accuracy_score(all_labels, all_preds)
+
+    rows = []
+    for path, true_idx, pred_idx, confidence in zip(all_paths, all_labels, all_preds, all_confidences):
+        rows.append({
+            "image_path": path,
+            "true_label": idx_to_label[true_idx],
+            "predicted_label": idx_to_label[pred_idx],
+            "confidence": round(float(confidence), 4),
+            "correct": bool(true_idx == pred_idx),
+        })
+
+    return avg_loss, acc, all_labels, all_preds, rows
+
+
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--no-pretrained", action="store_true")
+    args = parser.parse_args()
+
+    set_seed(42)
+
+    print("\n==============================")
+    print("DroneAI ViT Smoke Test")
+    print("==============================\n")
+
+    df = load_manifest()
+
+    label_counts = df["label"].value_counts().to_dict()
+    labels = sorted(df["label"].unique().tolist())
+
+    if len(labels) < 2:
+        raise ValueError("Need at least 2 labels for training.")
+
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+    idx_to_label = {i: label for label, i in label_to_idx.items()}
+
+    print("[INFO] Labels found:")
+    for label, count in label_counts.items():
+        print(f"  - {label}: {count} images")
+
+    # For this first smoke test, use image-level split.
+    # Later, for real evaluation, we should split by video/session.
+    min_class_count = min(label_counts.values())
+
+    stratify_col = df["label"] if min_class_count >= 2 else None
+
+    train_df, val_df = train_test_split(
+        df,
+        test_size=0.25,
+        random_state=42,
+        stratify=stratify_col,
+    )
+
+    print(f"\n[INFO] Training images: {len(train_df)}")
+    print(f"[INFO] Validation images: {len(val_df)}")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] Device: {device}")
+
+    model, transform = build_model(
+        num_classes=len(labels),
+        use_pretrained=not args.no_pretrained,
+    )
+
+    model = model.to(device)
+
+    train_dataset = FrameDataset(train_df, label_to_idx, transform=transform)
+    val_dataset = FrameDataset(val_df, label_to_idx, transform=transform)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=0,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=0,
+    )
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr,
+    )
+
+    history = []
+
+    for epoch in range(1, args.epochs + 1):
+        train_loss, train_acc = train_one_epoch(
+            model, train_loader, criterion, optimizer, device
+        )
+
+        val_loss, val_acc, val_true, val_pred, pred_rows = evaluate(
+            model, val_loader, criterion, device, idx_to_label
+        )
+
+        row = {
+            "epoch": epoch,
+            "train_loss": round(float(train_loss), 4),
+            "train_acc": round(float(train_acc), 4),
+            "val_loss": round(float(val_loss), 4),
+            "val_acc": round(float(val_acc), 4),
+        }
+
+        history.append(row)
+
+        print(
+            f"Epoch {epoch}/{args.epochs} | "
+            f"train_loss={train_loss:.4f}, train_acc={train_acc:.4f} | "
+            f"val_loss={val_loss:.4f}, val_acc={val_acc:.4f}"
+        )
+
+    # Final evaluation
+    val_loss, val_acc, val_true, val_pred, pred_rows = evaluate(
+        model, val_loader, criterion, device, idx_to_label
+    )
+
+    class_names = [idx_to_label[i] for i in range(len(labels))]
+
+    report = classification_report(
+        val_true,
+        val_pred,
+        target_names=class_names,
+        output_dict=True,
+        zero_division=0,
+    )
+
+    cm = confusion_matrix(val_true, val_pred, labels=list(range(len(labels))))
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = RESULTS_DIR / f"vit_smoke_test_{timestamp}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save model
+    model_path = run_dir / "vit_smoke_test_model.pth"
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "labels": labels,
+        "label_to_idx": label_to_idx,
+        "idx_to_label": idx_to_label,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "lr": args.lr,
+    }, model_path)
+
+    # Save labels
+    with open(run_dir / "labels.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "labels": labels,
+            "label_to_idx": label_to_idx,
+            "idx_to_label": idx_to_label,
+        }, f, indent=2)
+
+    # Save metrics
+    metrics = {
+        "created_at": datetime.now().isoformat(),
+        "device": str(device),
+        "total_images": int(len(df)),
+        "train_images": int(len(train_df)),
+        "val_images": int(len(val_df)),
+        "label_counts": label_counts,
+        "final_val_loss": round(float(val_loss), 4),
+        "final_val_acc": round(float(val_acc), 4),
+        "history": history,
+        "classification_report": report,
+        "note": "This is a smoke test. Image-level split can overestimate performance because frames from the same clip are similar.",
+    }
+
+    with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2)
+
+    # Save prediction samples
+    pd.DataFrame(pred_rows).to_csv(run_dir / "prediction_samples.csv", index=False)
+
+    # Save confusion matrix
+    cm_df = pd.DataFrame(cm, index=class_names, columns=class_names)
+    cm_df.to_csv(run_dir / "confusion_matrix.csv")
+
+    print("\n==============================")
+    print("Finished")
+    print("==============================")
+    print(f"Results saved to: {run_dir}")
+    print(f"Final validation accuracy: {val_acc:.4f}")
+    print("\nImportant: This is only a smoke test, not a final scientific result.\n")
+
+
+if __name__ == "__main__":
+    main()
