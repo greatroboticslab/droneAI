@@ -1192,6 +1192,42 @@ def frame_dataset_image():
 
     return send_file(str(target))
 
+@app.route("/vit_results")
+@login_required
+def vit_results_page():
+    runs = list_vit_runs()
+
+    selected_run = request.args.get("run", "").strip()
+    view_filter = request.args.get("view", "all").strip()
+
+    if view_filter not in ["all", "correct", "wrong"]:
+        view_filter = "all"
+
+    if not selected_run and runs:
+        selected_run = runs[0]["name"]
+
+    run_data = None
+    error = None
+
+    if selected_run:
+        try:
+            run_data = load_vit_run(
+                run_name=selected_run,
+                view_filter=view_filter,
+                limit=60,
+            )
+        except Exception as e:
+            error = str(e)
+
+    return render_template(
+        "vit_results.html",
+        runs=runs,
+        selected_run=selected_run,
+        view_filter=view_filter,
+        run_data=run_data,
+        error=error,
+    )
+
 
 if __name__ == "__main__":
     log = logging.getLogger("werkzeug")
