@@ -1,5 +1,11 @@
 from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session, send_file
 from agent_tools import overall_agent_status, install_package, mqtt_package_status
+from frame_extraction_backend import (
+    list_validation_sessions,
+    get_session_clips,
+    extract_frames_from_session,
+    FRAME_DATASET_DIR,
+)
 import os
 import logging
 import pandas as pd
@@ -1125,6 +1131,65 @@ def agent_page():
 @login_required
 def agent_status_api():
     return jsonify(overall_agent_status(mqtt_mgr))
+
+@app.route("/frame_extraction", methods=["GET", "POST"])
+@login_required
+def frame_extraction_page():
+    message = None
+    error = None
+    summary = None
+
+    sessions = list_validation_sessions()
+
+    selected_session = request.args.get("session", "")
+    clips = []
+
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        selected_session = request.form.get("session_name", "")
+        sample_fps = float(request.form.get("sample_fps", "5") or 5)
+
+        if action == "extract":
+            try:
+                summary = extract_frames_from_session(
+                    session_name=selected_session,
+                    sample_fps=sample_fps,
+                    overwrite=True,
+                )
+                message = f"Extracted {summary['total_frames_saved']} frames from {summary['clips_processed']} clips."
+            except Exception as e:
+                error = str(e)
+
+    if selected_session:
+        clips = get_session_clips(selected_session)
+
+    return render_template(
+        "frame_extraction.html",
+        sessions=sessions,
+        selected_session=selected_session,
+        clips=clips,
+        summary=summary,
+        message=message,
+        error=error,
+    )
+
+
+@app.route("/frame_dataset_image")
+@login_required
+def frame_dataset_image():
+    rel_path = request.args.get("path", "")
+    rel_path = rel_path.replace("\\", "/").strip("/")
+
+    target = (FRAME_DATASET_DIR / rel_path).resolve()
+    base = FRAME_DATASET_DIR.resolve()
+
+    if not str(target).startswith(str(base)):
+        return "Invalid image path.", 403
+
+    if not target.exists():
+        return "Image not found.", 404
+
+    return send_file(str(target))
 
 
 if __name__ == "__main__":
