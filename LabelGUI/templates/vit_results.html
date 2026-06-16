@@ -175,7 +175,7 @@
               {% for row in run_data.confusion.rows %}
                 <tr>
                   <th>{{ row.label }}</th>
-                  {% for value in row.values %}
+                  {% for value in row["values"] %}
                     <td>{{ value }}</td>
                   {% endfor %}
                 </tr>
