@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.models import vit_b_16, ViT_B_16_Weights
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 
@@ -82,8 +82,8 @@ def load_manifest():
     if missing:
         raise ValueError(f"Manifest is missing columns: {missing}")
 
-    # Remove rows where image file does not exist
     existing_rows = []
+
     for _, row in df.iterrows():
         image_path = FRAME_DATASET_DIR / row["image_path"]
         if image_path.exists():
@@ -95,19 +95,115 @@ def load_manifest():
         raise ValueError("No valid images found in FrameDataset.")
 
     df["label"] = df["label"].astype(str)
+    df["session_name"] = df["session_name"].astype(str)
+    df["clip_filename"] = df["clip_filename"].astype(str)
+
+    # A clip group must include the session name because many sessions may have
+    # clip names like 001_takeoff.mp4.
+    df["clip_group"] = df["session_name"] + "__" + df["clip_filename"]
 
     return df
+
+
+# ------------------------------------------------------------
+# Split helpers
+# ------------------------------------------------------------
+def make_train_val_split(df, split_mode="image", test_size=0.25):
+    """
+    image:
+        Random frame-level split.
+        Fast smoke test, but can overestimate performance.
+
+    clip:
+        Keeps all frames from the same clip together.
+
+    session:
+        Keeps all frames from the same labeled video/session together.
+        This is the most honest, but needs more data.
+    """
+
+    split_note = ""
+
+    if split_mode == "image":
+        label_counts = df["label"].value_counts().to_dict()
+        min_class_count = min(label_counts.values())
+        stratify_col = df["label"] if min_class_count >= 2 else None
+
+        train_df, val_df = train_test_split(
+            df,
+            test_size=test_size,
+            random_state=42,
+            stratify=stratify_col,
+        )
+
+        split_note = (
+            "Image-level split. This is useful for a smoke test, but it can "
+            "overestimate performance because frames from the same clip may "
+            "appear in both training and validation."
+        )
+
+        return train_df, val_df, split_note
+
+    if split_mode == "clip":
+        group_col = "clip_group"
+        split_note = (
+            "Clip-level split. Frames from the same clip are kept together. "
+            "This is more honest than image-level splitting."
+        )
+
+    elif split_mode == "session":
+        group_col = "session_name"
+        split_note = (
+            "Session-level split. Frames from the same labeled video/session "
+            "are kept together. This is the most honest split, but it needs "
+            "more labeled videos to be stable."
+        )
+
+    else:
+        raise ValueError(f"Unknown split mode: {split_mode}")
+
+    unique_groups = df[group_col].nunique()
+
+    if unique_groups < 2:
+        print("[WARNING] Not enough groups for group split. Falling back to image split.")
+        return make_train_val_split(df, split_mode="image", test_size=test_size)
+
+    splitter = GroupShuffleSplit(
+        n_splits=1,
+        test_size=test_size,
+        random_state=42,
+    )
+
+    train_idx, val_idx = next(
+        splitter.split(df, groups=df[group_col])
+    )
+
+    train_df = df.iloc[train_idx].copy()
+    val_df = df.iloc[val_idx].copy()
+
+    if train_df.empty or val_df.empty:
+        print("[WARNING] Group split created an empty train or validation set. Falling back to image split.")
+        return make_train_val_split(df, split_mode="image", test_size=test_size)
+
+    train_labels = set(train_df["label"].unique())
+    val_labels = set(val_df["label"].unique())
+
+    missing_train = sorted(set(df["label"].unique()) - train_labels)
+    missing_val = sorted(set(df["label"].unique()) - val_labels)
+
+    if missing_train:
+        print("[WARNING] These labels are missing from training split:", missing_train)
+
+    if missing_val:
+        print("[WARNING] These labels are missing from validation split:", missing_val)
+
+    return train_df, val_df, split_note
 
 
 # ------------------------------------------------------------
 # Model
 # ------------------------------------------------------------
 def build_model(num_classes, use_pretrained=True):
-    """
-    Loads ViT-B/16 and replaces the final classification layer.
-    For this smoke test, we freeze the backbone and train only the head.
-    """
-
     weights = None
 
     if use_pretrained:
@@ -126,8 +222,8 @@ def build_model(num_classes, use_pretrained=True):
     in_features = model.heads.head.in_features
     model.heads.head = nn.Linear(in_features, num_classes)
 
-    # Freeze backbone for quick smoke test
-    for name, param in model.named_parameters():
+    # Freeze backbone for quick test
+    for param in model.parameters():
         param.requires_grad = False
 
     # Train only classification head
@@ -214,7 +310,10 @@ def evaluate(model, loader, criterion, device, idx_to_label):
     acc = accuracy_score(all_labels, all_preds)
 
     rows = []
-    for path, true_idx, pred_idx, confidence in zip(all_paths, all_labels, all_preds, all_confidences):
+
+    for path, true_idx, pred_idx, confidence in zip(
+        all_paths, all_labels, all_preds, all_confidences
+    ):
         rows.append({
             "image_path": path,
             "true_label": idx_to_label[true_idx],
@@ -235,13 +334,23 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--no-pretrained", action="store_true")
+    parser.add_argument(
+        "--split-mode",
+        type=str,
+        default="image",
+        choices=["image", "clip", "session"],
+        help="image = random frame split, clip = clip-level split, session = video/session-level split",
+    )
+
     args = parser.parse_args()
 
     set_seed(42)
 
     print("\n==============================")
-    print("DroneAI ViT Smoke Test")
+    print("DroneAI ViT Test")
     print("==============================\n")
+
+    print(f"[INFO] Split mode: {args.split_mode}")
 
     df = load_manifest()
 
@@ -254,28 +363,30 @@ def main():
     label_to_idx = {label: i for i, label in enumerate(labels)}
     idx_to_label = {i: label for label, i in label_to_idx.items()}
 
-    print("[INFO] Labels found:")
+    print("\n[INFO] Labels found:")
     for label, count in label_counts.items():
         print(f"  - {label}: {count} images")
 
-    # For this first smoke test, use image-level split.
-    # Later, for real evaluation, we should split by video/session.
-    min_class_count = min(label_counts.values())
+    print(f"\n[INFO] Sessions found: {df['session_name'].nunique()}")
+    print(f"[INFO] Clips found: {df['clip_group'].nunique()}")
 
-    stratify_col = df["label"] if min_class_count >= 2 else None
-
-    train_df, val_df = train_test_split(
+    train_df, val_df, split_note = make_train_val_split(
         df,
+        split_mode=args.split_mode,
         test_size=0.25,
-        random_state=42,
-        stratify=stratify_col,
     )
 
     print(f"\n[INFO] Training images: {len(train_df)}")
     print(f"[INFO] Validation images: {len(val_df)}")
 
+    print("\n[INFO] Training label counts:")
+    print(train_df["label"].value_counts().to_string())
+
+    print("\n[INFO] Validation label counts:")
+    print(val_df["label"].value_counts().to_string())
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[INFO] Device: {device}")
+    print(f"\n[INFO] Device: {device}")
 
     model, transform = build_model(
         num_classes=len(labels),
@@ -302,6 +413,7 @@ def main():
     )
 
     criterion = nn.CrossEntropyLoss()
+
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr,
@@ -311,11 +423,19 @@ def main():
 
     for epoch in range(1, args.epochs + 1):
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, criterion, optimizer, device
+            model,
+            train_loader,
+            criterion,
+            optimizer,
+            device,
         )
 
         val_loss, val_acc, val_true, val_pred, pred_rows = evaluate(
-            model, val_loader, criterion, device, idx_to_label
+            model,
+            val_loader,
+            criterion,
+            device,
+            idx_to_label,
         )
 
         row = {
@@ -334,9 +454,12 @@ def main():
             f"val_loss={val_loss:.4f}, val_acc={val_acc:.4f}"
         )
 
-    # Final evaluation
     val_loss, val_acc, val_true, val_pred, pred_rows = evaluate(
-        model, val_loader, criterion, device, idx_to_label
+        model,
+        val_loader,
+        criterion,
+        device,
+        idx_to_label,
     )
 
     class_names = [idx_to_label[i] for i in range(len(labels))]
@@ -344,19 +467,24 @@ def main():
     report = classification_report(
         val_true,
         val_pred,
+        labels=list(range(len(labels))),
         target_names=class_names,
         output_dict=True,
         zero_division=0,
     )
 
-    cm = confusion_matrix(val_true, val_pred, labels=list(range(len(labels))))
+    cm = confusion_matrix(
+        val_true,
+        val_pred,
+        labels=list(range(len(labels))),
+    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = RESULTS_DIR / f"vit_smoke_test_{timestamp}"
+    run_dir = RESULTS_DIR / f"vit_{args.split_mode}_test_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save model
-    model_path = run_dir / "vit_smoke_test_model.pth"
+    model_path = run_dir / "vit_model.pth"
+
     torch.save({
         "model_state_dict": model.state_dict(),
         "labels": labels,
@@ -365,9 +493,9 @@ def main():
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "lr": args.lr,
+        "split_mode": args.split_mode,
     }, model_path)
 
-    # Save labels
     with open(run_dir / "labels.json", "w", encoding="utf-8") as f:
         json.dump({
             "labels": labels,
@@ -375,37 +503,47 @@ def main():
             "idx_to_label": idx_to_label,
         }, f, indent=2)
 
-    # Save metrics
     metrics = {
         "created_at": datetime.now().isoformat(),
         "device": str(device),
+        "split_mode": args.split_mode,
         "total_images": int(len(df)),
         "train_images": int(len(train_df)),
         "val_images": int(len(val_df)),
+        "total_sessions": int(df["session_name"].nunique()),
+        "total_clips": int(df["clip_group"].nunique()),
+        "train_sessions": int(train_df["session_name"].nunique()),
+        "val_sessions": int(val_df["session_name"].nunique()),
+        "train_clips": int(train_df["clip_group"].nunique()),
+        "val_clips": int(val_df["clip_group"].nunique()),
         "label_counts": label_counts,
+        "train_label_counts": train_df["label"].value_counts().to_dict(),
+        "val_label_counts": val_df["label"].value_counts().to_dict(),
         "final_val_loss": round(float(val_loss), 4),
         "final_val_acc": round(float(val_acc), 4),
         "history": history,
         "classification_report": report,
-        "note": "This is a smoke test. Image-level split can overestimate performance because frames from the same clip are similar.",
+        "note": split_note,
     }
 
     with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
-    # Save prediction samples
     pd.DataFrame(pred_rows).to_csv(run_dir / "prediction_samples.csv", index=False)
 
-    # Save confusion matrix
     cm_df = pd.DataFrame(cm, index=class_names, columns=class_names)
     cm_df.to_csv(run_dir / "confusion_matrix.csv")
+
+    # Save train/val split for inspection
+    train_df.to_csv(run_dir / "train_split.csv", index=False)
+    val_df.to_csv(run_dir / "val_split.csv", index=False)
 
     print("\n==============================")
     print("Finished")
     print("==============================")
     print(f"Results saved to: {run_dir}")
     print(f"Final validation accuracy: {val_acc:.4f}")
-    print("\nImportant: This is only a smoke test, not a final scientific result.\n")
+    print("\nImportant: Compare image, clip, and session splits. Session split is the most honest, but needs more data.\n")
 
 
 if __name__ == "__main__":
