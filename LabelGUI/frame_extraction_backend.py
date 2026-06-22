@@ -100,6 +100,50 @@ def list_validation_sessions():
 
     return sessions
 
+def _make_unique_source_name(base_name: str) -> str:
+    """
+    Makes sure each uploaded clip folder gets a unique source name.
+    This prevents one upload from deleting or overwriting another upload.
+    """
+    base_name = _safe_name(base_name or "uploaded_clip_folder")
+
+    existing = set()
+
+    global_manifest_path = FRAME_DATASET_DIR / "frame_manifest.csv"
+
+    if global_manifest_path.exists():
+        try:
+            old_df = pd.read_csv(global_manifest_path)
+            if "source_name" in old_df.columns:
+                existing.update(old_df["source_name"].dropna().astype(str).tolist())
+            elif "session_name" in old_df.columns:
+                existing.update(old_df["session_name"].dropna().astype(str).tolist())
+        except Exception:
+            pass
+
+    if FRAME_DATASET_DIR.exists():
+        for label_dir in FRAME_DATASET_DIR.iterdir():
+            if not label_dir.is_dir():
+                continue
+
+            for img in label_dir.glob("*.jpg"):
+                stem = img.stem
+                if "__" in stem:
+                    existing.add(stem.split("__")[0])
+
+    if base_name not in existing:
+        return base_name
+
+    counter = 2
+
+    while True:
+        candidate = f"{base_name}_{counter}"
+
+        if candidate not in existing:
+            return candidate
+
+        counter += 1
+
 
 def get_session_clips(session_name: str):
     """
@@ -280,8 +324,8 @@ def extract_frames_from_uploaded_clip_folder(uploaded_files, source_name: str = 
     """
     Extract frames directly from an uploaded folder of clips.
 
-    The uploaded clips are saved temporarily, processed, and then removed.
-    The clips are NOT permanently stored by the app.
+    Every uploaded folder is treated as a new source.
+    It does NOT delete frames from previous uploaded folders.
 
     Expected clip names:
         001_takeoff.mp4
@@ -308,7 +352,7 @@ def extract_frames_from_uploaded_clip_folder(uploaded_files, source_name: str = 
     if not mp4_files:
         raise FileNotFoundError("No .mp4 clips were found in the uploaded folder.")
 
-    # If user did not type a source name, infer it from the uploaded folder name
+    # If user did not type a source name, infer it from the uploaded folder name.
     if not source_name:
         first_name = (mp4_files[0].filename or "").replace("\\", "/")
         parts = [p for p in first_name.split("/") if p]
@@ -318,20 +362,10 @@ def extract_frames_from_uploaded_clip_folder(uploaded_files, source_name: str = 
         else:
             source_name = "uploaded_clip_folder"
 
-    source_name = _safe_name(source_name)
+    # Make every upload unique so uploads do not replace each other.
+    source_name = _make_unique_source_name(source_name)
+
     extracted_at = datetime.utcnow().isoformat()
-
-    # Remove old frames from this same uploaded source name
-    if FRAME_DATASET_DIR.exists():
-        for label_dir in FRAME_DATASET_DIR.iterdir():
-            if not label_dir.is_dir():
-                continue
-
-            for img in label_dir.glob(f"{source_name}__*.jpg"):
-                try:
-                    img.unlink()
-                except Exception:
-                    pass
 
     manifest_rows = []
     label_counts = {}
@@ -366,7 +400,9 @@ def extract_frames_from_uploaded_clip_folder(uploaded_files, source_name: str = 
             frame_index = 0
             saved_index = 0
 
-            clip_stem = _safe_name(Path(original_rel_path).with_suffix("").as_posix().replace("/", "__"))
+            clip_stem = _safe_name(
+                Path(original_rel_path).with_suffix("").as_posix().replace("/", "__")
+            )
 
             while True:
                 ret, frame = cap.read()
@@ -423,19 +459,13 @@ def extract_frames_from_uploaded_clip_folder(uploaded_files, source_name: str = 
     source_manifest_path = FRAME_DATASET_DIR / f"{safe_source}_frame_manifest.csv"
     new_df.to_csv(source_manifest_path, index=False)
 
-    # Update global manifest used by ViT training
+    # Append to global manifest used by ViT training.
+    # Do not delete previous uploaded folders.
     global_manifest_path = FRAME_DATASET_DIR / "frame_manifest.csv"
 
     if global_manifest_path.exists():
         try:
             old_df = pd.read_csv(global_manifest_path)
-
-            # Remove old rows from this same upload source
-            if "source_name" in old_df.columns:
-                old_df = old_df[old_df["source_name"] != source_name]
-            elif "session_name" in old_df.columns:
-                old_df = old_df[old_df["session_name"] != source_name]
-
             combined = pd.concat([old_df, new_df], ignore_index=True)
             combined = combined.drop_duplicates(subset=["image_path"], keep="last")
             combined.to_csv(global_manifest_path, index=False)
