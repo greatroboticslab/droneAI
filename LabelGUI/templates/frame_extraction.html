@@ -17,7 +17,7 @@
     <div class="nav-actions">
       <a class="btn btn--ghost" href="/">Dashboard</a>
       <a class="btn btn--ghost" href="/queue">Shared Queue</a>
-      <a class="btn btn--ghost" href="/training_index">Training</a>
+      <a class="btn btn--ghost" href="/vit_results">ViT Results</a>
       <a class="btn btn--ghost" href="/logout">Logout</a>
     </div>
   </div>
@@ -40,7 +40,8 @@
   <div class="grid grid--2">
 
     <section class="card">
-      <h2>Select Session</h2>
+      <h2>Extract From Saved Session</h2>
+      <p class="muted">Use this if you want to extract frames from every clip in a saved validation session.</p>
 
       {% if sessions %}
         <form method="GET" action="/frame_extraction">
@@ -57,14 +58,14 @@
 
         {% if selected_session %}
           <form method="POST" action="/frame_extraction" style="margin-top:18px;">
-            <input type="hidden" name="action" value="extract">
+            <input type="hidden" name="action" value="extract_session">
             <input type="hidden" name="session_name" value="{{ selected_session }}">
 
             <label>Extraction FPS</label>
             <input name="sample_fps" value="5">
 
             <div class="actions actions--big">
-              <button class="btn btn--primary" type="submit">Extract Frames</button>
+              <button class="btn btn--primary" type="submit">Extract Session Frames</button>
             </div>
           </form>
         {% endif %}
@@ -74,41 +75,74 @@
     </section>
 
     <section class="card">
-      <h2>Clips</h2>
+      <h2>Upload Clip Folder</h2>
+      <p class="muted">Use this for training data. Upload a folder after you remove bad clips from it.</p>
 
-      {% if clips %}
-        <table>
-          <thead>
-            <tr>
-              <th>Clip</th>
-              <th>Label</th>
-              <th>Duration</th>
-              <th>Frames</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for c in clips %}
-              <tr>
-                <td>{{ c.filename }}</td>
-                <td><span class="chip">{{ c.label }}</span></td>
-                <td>{{ c.duration_sec }} sec</td>
-                <td>{{ c.frame_count }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p class="muted">Select a session to view clips.</p>
-      {% endif %}
+      <form method="POST" action="/frame_extraction" enctype="multipart/form-data">
+        <input type="hidden" name="action" value="extract_uploaded_folder">
+
+        <label>Dataset / Source Name</label>
+        <input name="source_name" placeholder="Example: real_third_person_v1">
+
+        <label>Clip Folder</label>
+        <input
+          type="file"
+          name="clip_folder"
+          webkitdirectory
+          directory
+          multiple
+        >
+
+        <label>Extraction FPS</label>
+        <input name="sample_fps" value="5">
+
+        <div class="actions actions--big">
+          <button class="btn btn--primary" type="submit">Upload Folder and Extract Frames</button>
+        </div>
+      </form>
+
+      <p class="muted" style="margin-top:12px;">
+        The app will process only .mp4 clips. Clip names should include the label, like 001_takeoff.mp4 or 003_severe-crash.mp4.
+      </p>
     </section>
 
   </div>
 
+  <section class="card" style="margin-top:18px;">
+    <h2>Session Clips</h2>
+
+    {% if clips %}
+      <table>
+        <thead>
+          <tr>
+            <th>Clip</th>
+            <th>Label</th>
+            <th>Duration</th>
+            <th>Frames</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in clips %}
+            <tr>
+              <td>{{ c.filename }}</td>
+              <td><span class="chip">{{ c.label }}</span></td>
+              <td>{{ c.duration_sec }} sec</td>
+              <td>{{ c.frame_count }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">Select a saved session to view its clips.</p>
+    {% endif %}
+  </section>
+
   {% if summary %}
-    <div class="card" style="margin-top:18px;">
+    <section class="card" style="margin-top:18px;">
       <h2>Extraction Summary</h2>
 
-      <p><b>Session:</b> {{ summary.session_name }}</p>
+      <p><b>Source:</b> {{ summary.source_name if summary.source_name else summary.session_name }}</p>
+      <p><b>Source Type:</b> {{ summary.source_type if summary.source_type else "validation_session" }}</p>
       <p><b>Frames Saved:</b> {{ summary.total_frames_saved }}</p>
       <p><b>Clips Processed:</b> {{ summary.clips_processed }}</p>
       <p><b>Output Folder:</b> {{ summary.output_dir }}</p>
@@ -135,7 +169,7 @@
           {% endfor %}
         </div>
       {% endif %}
-    </div>
+    </section>
   {% endif %}
 
 </main>
