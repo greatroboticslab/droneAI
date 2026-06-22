@@ -5,6 +5,7 @@ from frame_extraction_backend import (
     list_validation_sessions,
     get_session_clips,
     extract_frames_from_session,
+    extract_frames_from_uploaded_clip_folder,
     FRAME_DATASET_DIR,
 )
 import os
@@ -1147,17 +1148,35 @@ def frame_extraction_page():
 
     if request.method == "POST":
         action = request.form.get("action", "")
-        selected_session = request.form.get("session_name", "")
         sample_fps = float(request.form.get("sample_fps", "5") or 5)
 
-        if action == "extract":
+        if action == "extract_session":
+            selected_session = request.form.get("session_name", "")
+
             try:
                 summary = extract_frames_from_session(
                     session_name=selected_session,
                     sample_fps=sample_fps,
                     overwrite=True,
                 )
+
                 message = f"Extracted {summary['total_frames_saved']} frames from {summary['clips_processed']} clips."
+            except Exception as e:
+                error = str(e)
+
+        elif action == "extract_uploaded_folder":
+            source_name = request.form.get("source_name", "").strip()
+            uploaded_files = request.files.getlist("clip_folder")
+
+            try:
+                summary = extract_frames_from_uploaded_clip_folder(
+                    uploaded_files=uploaded_files,
+                    source_name=source_name,
+                    sample_fps=sample_fps,
+                    overwrite=True,
+                )
+
+                message = f"Extracted {summary['total_frames_saved']} frames from {summary['clips_processed']} uploaded clips."
             except Exception as e:
                 error = str(e)
 
@@ -1173,8 +1192,6 @@ def frame_extraction_page():
         message=message,
         error=error,
     )
-
-
 @app.route("/frame_dataset_image")
 @login_required
 def frame_dataset_image():
