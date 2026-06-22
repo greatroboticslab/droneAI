@@ -2,6 +2,7 @@ import os
 import re
 import cv2
 import json
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -270,6 +271,193 @@ def extract_frames_from_session(session_name: str, sample_fps: float = 5.0, over
     }
 
     summary_path = FRAME_DATASET_DIR / f"{session_name}_extraction_summary.json"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    return summary
+
+def extract_frames_from_uploaded_clip_folder(uploaded_files, source_name: str = "", sample_fps: float = 5.0, overwrite: bool = True):
+    """
+    Extract frames directly from an uploaded folder of clips.
+
+    The uploaded clips are saved temporarily, processed, and then removed.
+    The clips are NOT permanently stored by the app.
+
+    Expected clip names:
+        001_takeoff.mp4
+        002_land.mp4
+        003_minor-crash.mp4
+        004_severe-crash.mp4
+    """
+    sample_fps = float(sample_fps or 5.0)
+
+    if sample_fps <= 0:
+        sample_fps = 5.0
+
+    FRAME_DATASET_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Keep only mp4 files
+    mp4_files = []
+
+    for f in uploaded_files:
+        filename = (f.filename or "").replace("\\", "/")
+
+        if filename.lower().endswith(".mp4"):
+            mp4_files.append(f)
+
+    if not mp4_files:
+        raise FileNotFoundError("No .mp4 clips were found in the uploaded folder.")
+
+    # If user did not type a source name, infer it from the uploaded folder name
+    if not source_name:
+        first_name = (mp4_files[0].filename or "").replace("\\", "/")
+        parts = [p for p in first_name.split("/") if p]
+
+        if len(parts) > 1:
+            source_name = parts[0]
+        else:
+            source_name = "uploaded_clip_folder"
+
+    source_name = _safe_name(source_name)
+    extracted_at = datetime.utcnow().isoformat()
+
+    # Remove old frames from this same uploaded source name
+    if FRAME_DATASET_DIR.exists():
+        for label_dir in FRAME_DATASET_DIR.iterdir():
+            if not label_dir.is_dir():
+                continue
+
+            for img in label_dir.glob(f"{source_name}__*.jpg"):
+                try:
+                    img.unlink()
+                except Exception:
+                    pass
+
+    manifest_rows = []
+    label_counts = {}
+    preview_images = []
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir = Path(temp_dir)
+
+        for uploaded_file in mp4_files:
+            original_rel_path = (uploaded_file.filename or "").replace("\\", "/")
+            original_name = Path(original_rel_path).name
+
+            safe_clip_name = _safe_name(original_name)
+
+            temp_clip_path = temp_dir / safe_clip_name
+            uploaded_file.save(str(temp_clip_path))
+
+            label = parse_label_from_clip_name(original_name)
+            label = _safe_name(label.lower()).replace("_", "-")
+
+            label_dir = FRAME_DATASET_DIR / label
+            label_dir.mkdir(parents=True, exist_ok=True)
+
+            cap = cv2.VideoCapture(str(temp_clip_path))
+
+            if not cap.isOpened():
+                continue
+
+            source_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            step = max(1, int(round(source_fps / sample_fps)))
+
+            frame_index = 0
+            saved_index = 0
+
+            clip_stem = _safe_name(Path(original_rel_path).with_suffix("").as_posix().replace("/", "__"))
+
+            while True:
+                ret, frame = cap.read()
+
+                if not ret:
+                    break
+
+                if frame_index % step == 0:
+                    saved_index += 1
+
+                    out_name = f"{source_name}__{clip_stem}__frame_{saved_index:06d}.jpg"
+                    out_path = label_dir / out_name
+
+                    if overwrite or not out_path.exists():
+                        cv2.imwrite(str(out_path), frame)
+
+                    rel_path = out_path.relative_to(FRAME_DATASET_DIR)
+                    rel_path_str = str(rel_path).replace("\\", "/")
+
+                    frame_time_sec = frame_index / source_fps if source_fps else 0.0
+
+                    manifest_rows.append({
+                        "source_type": "uploaded_clip_folder",
+                        "source_name": source_name,
+                        "session_name": source_name,
+                        "clip_filename": original_rel_path,
+                        "label": label,
+                        "source_frame_index": frame_index,
+                        "frame_time_sec": round(frame_time_sec, 3),
+                        "image_path": rel_path_str,
+                        "extracted_at": extracted_at,
+                    })
+
+                    label_counts[label] = label_counts.get(label, 0) + 1
+
+                    if len(preview_images) < 12:
+                        preview_images.append({
+                            "label": label,
+                            "path": rel_path_str,
+                        })
+
+                frame_index += 1
+
+            cap.release()
+
+    if not manifest_rows:
+        raise RuntimeError("The clips were uploaded, but no frames were extracted.")
+
+    new_df = pd.DataFrame(manifest_rows)
+
+    safe_source = _safe_name(source_name)
+
+    # Save per-upload manifest
+    source_manifest_path = FRAME_DATASET_DIR / f"{safe_source}_frame_manifest.csv"
+    new_df.to_csv(source_manifest_path, index=False)
+
+    # Update global manifest used by ViT training
+    global_manifest_path = FRAME_DATASET_DIR / "frame_manifest.csv"
+
+    if global_manifest_path.exists():
+        try:
+            old_df = pd.read_csv(global_manifest_path)
+
+            # Remove old rows from this same upload source
+            if "source_name" in old_df.columns:
+                old_df = old_df[old_df["source_name"] != source_name]
+            elif "session_name" in old_df.columns:
+                old_df = old_df[old_df["session_name"] != source_name]
+
+            combined = pd.concat([old_df, new_df], ignore_index=True)
+            combined = combined.drop_duplicates(subset=["image_path"], keep="last")
+            combined.to_csv(global_manifest_path, index=False)
+        except Exception:
+            new_df.to_csv(global_manifest_path, index=False)
+    else:
+        new_df.to_csv(global_manifest_path, index=False)
+
+    summary = {
+        "source_type": "uploaded_clip_folder",
+        "source_name": source_name,
+        "session_name": source_name,
+        "sample_fps": sample_fps,
+        "clips_processed": len(mp4_files),
+        "total_frames_saved": len(manifest_rows),
+        "label_counts": label_counts,
+        "output_dir": str(FRAME_DATASET_DIR),
+        "preview_images": preview_images,
+    }
+
+    summary_path = FRAME_DATASET_DIR / f"{safe_source}_extraction_summary.json"
+
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
