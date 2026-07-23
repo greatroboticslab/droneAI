@@ -69,6 +69,182 @@ def mean_column(group, col):
     if col not in group.columns:
         return 0.0
 
+def build_quality_context(clip_df):
+    """
+    Builds dataset-level thresholds so we can flag unusually high speed/acceleration clips.
+    These are not hard scientific rules. They are diagnostic thresholds for review.
+    """
+
+    if clip_df.empty:
+        return {
+            "speed_q95": 0.0,
+            "accel_q95": 0.0,
+        }
+
+    speed_values = pd.to_numeric(
+        clip_df.get("det_speed_norm_per_sec_max", pd.Series(dtype=float)),
+        errors="coerce"
+    ).fillna(0.0)
+
+    accel_values = pd.to_numeric(
+        clip_df.get("det_accel_max", pd.Series(dtype=float)),
+        errors="coerce"
+    ).fillna(0.0)
+
+    return {
+        "speed_q95": float(speed_values.quantile(0.95)) if len(speed_values) else 0.0,
+        "accel_q95": float(accel_values.quantile(0.95)) if len(accel_values) else 0.0,
+    }
+
+
+def average_confidence_from_row(row):
+    conf_a = safe_float(row.get("conf_a_mean", 0.0))
+    conf_b = safe_float(row.get("conf_b_mean", 0.0))
+
+    values = [v for v in [conf_a, conf_b] if v > 0]
+
+    if not values:
+        return 0.0
+
+    return sum(values) / len(values)
+
+
+def add_quality_flag(flags, level, title, detail):
+    flags.append({
+        "level": level,
+        "title": title,
+        "detail": detail,
+    })
+
+
+def quality_status_from_flags(flags):
+    if not flags:
+        return "Looks OK", "ok"
+
+    levels = [f["level"] for f in flags]
+
+    if "review" in levels:
+        return "Needs Review", "review"
+
+    return "Check", "check"
+
+
+def build_quality_flags(row, quality_context=None):
+    """
+    Automatic diagnostic flags for clip review.
+
+    Important:
+    These flags are not final judgments. They are meant to help us find clips where
+    optical flow, detection, or labels may need closer inspection.
+    """
+
+    if quality_context is None:
+        quality_context = {}
+
+    flags = []
+
+    roi_rate = safe_float(row.get("roi_available_rate", 0.0))
+    both_rate = safe_float(row.get("both_detected_rate", 0.0))
+
+    avg_detected_speed = safe_float(row.get("det_speed_norm_per_sec_mean", 0.0))
+    peak_detected_speed = safe_float(row.get("det_speed_norm_per_sec_max", 0.0))
+
+    avg_flow_speed = safe_float(row.get("flow_mag_norm_per_sec_mean", 0.0))
+    peak_accel = safe_float(row.get("det_accel_max", 0.0))
+
+    avg_confidence = average_confidence_from_row(row)
+
+    speed_q95 = safe_float(quality_context.get("speed_q95", 0.0))
+    accel_q95 = safe_float(quality_context.get("accel_q95", 0.0))
+
+    clip_group = str(row.get("clip_group", ""))
+
+    # Detection / ROI quality
+    if roi_rate < 0.70:
+        add_quality_flag(
+            flags,
+            "review",
+            "Low ROI coverage",
+            f"ROI available rate is {roi_rate * 100:.1f}%. Optical flow may not be focused on the drone for much of this clip."
+        )
+    elif roi_rate < 0.85:
+        add_quality_flag(
+            flags,
+            "check",
+            "Moderate ROI coverage",
+            f"ROI available rate is {roi_rate * 100:.1f}%. This clip is usable but should be inspected."
+        )
+
+    if both_rate < 0.60:
+        add_quality_flag(
+            flags,
+            "review",
+            "Low both-frame detection",
+            f"Both-detected rate is {both_rate * 100:.1f}%. The drone is often missing in one of the frame pairs."
+        )
+    elif both_rate < 0.75:
+        add_quality_flag(
+            flags,
+            "check",
+            "Detection gaps",
+            f"Both-detected rate is {both_rate * 100:.1f}%. Some velocity values may be less reliable."
+        )
+
+    if avg_confidence > 0 and avg_confidence < 0.50:
+        add_quality_flag(
+            flags,
+            "check",
+            "Low detector confidence",
+            f"Average detector confidence is {avg_confidence:.2f}."
+        )
+
+    # Motion quality
+    if peak_detected_speed < 0.030:
+        add_quality_flag(
+            flags,
+            "check",
+            "Very low detected movement",
+            f"Peak detected-center speed is only {peak_detected_speed:.4f}. This may be a slow event, missed motion, or a weak detection track."
+        )
+
+    if speed_q95 > 0 and peak_detected_speed > speed_q95:
+        add_quality_flag(
+            flags,
+            "check",
+            "Large speed spike",
+            f"Peak detected-center speed is {peak_detected_speed:.4f}, above the dataset 95th percentile of {speed_q95:.4f}."
+        )
+
+    if accel_q95 > 0 and peak_accel > accel_q95:
+        add_quality_flag(
+            flags,
+            "check",
+            "Large acceleration spike",
+            f"Peak acceleration is {peak_accel:.4f}, above the dataset 95th percentile of {accel_q95:.4f}."
+        )
+
+    # Possible mismatch: detected center moves, but optical flow magnitude is very small.
+    if avg_detected_speed > 0.15 and avg_flow_speed < 0.005:
+        add_quality_flag(
+            flags,
+            "check",
+            "Motion mismatch",
+            f"Detected-center speed is {avg_detected_speed:.4f}, but optical-flow magnitude is only {avg_flow_speed:.4f}."
+        )
+
+    # Debug-image availability
+    if clip_group:
+        debug_images = list_debug_images_for_clip(clip_group, limit=1)
+        if not debug_images:
+            add_quality_flag(
+                flags,
+                "check",
+                "No debug image",
+                "No optical-flow debug image was found for this clip."
+            )
+
+    return flags
+
     values = pd.to_numeric(group[col], errors="coerce").fillna(0.0)
     return float(values.mean()) if len(values) else 0.0
 
@@ -391,13 +567,17 @@ def make_acceleration(values):
     return accel
 
 
-def make_clip_list(clip_df):
+def make_clip_list(clip_df, quality_context=None):
     if clip_df.empty:
         return []
+
+    if quality_context is None:
+        quality_context = build_quality_context(clip_df)
 
     rows = []
 
     sort_cols = []
+
     for col in ["label", "clip_filename", "clip_group"]:
         if col in clip_df.columns:
             sort_cols.append(col)
@@ -406,6 +586,9 @@ def make_clip_list(clip_df):
         clip_df = clip_df.sort_values(sort_cols)
 
     for _, row in clip_df.iterrows():
+        flags = build_quality_flags(row, quality_context)
+        quality_status, quality_css = quality_status_from_flags(flags)
+
         rows.append({
             "clip_group": str(row.get("clip_group", "")),
             "label": str(row.get("label", "")),
@@ -418,10 +601,14 @@ def make_clip_list(clip_df):
             "peak_detected_speed": safe_float(row.get("det_speed_norm_per_sec_max", 0.0)),
             "avg_flow_speed": safe_float(row.get("flow_mag_norm_per_sec_mean", 0.0)),
             "avg_accel": safe_float(row.get("det_accel_mean", 0.0)),
+
+            "quality_status": quality_status,
+            "quality_css": quality_css,
+            "quality_flag_count": len(flags),
+            "quality_flags": flags,
         })
 
     return rows
-
 
 def load_optical_flow_clip_explorer_data(selected_clip_group=""):
     clip_df = load_clip_summary()
@@ -438,7 +625,8 @@ def load_optical_flow_clip_explorer_data(selected_clip_group=""):
             ),
         }
 
-    clip_list = make_clip_list(clip_df)
+    quality_context = build_quality_context(clip_df)
+    clip_list = make_clip_list(clip_df, quality_context)
 
     if not selected_clip_group and clip_list:
         selected_clip_group = clip_list[0]["clip_group"]
@@ -454,6 +642,8 @@ def load_optical_flow_clip_explorer_data(selected_clip_group=""):
     selected_steps = selected_steps.sort_values("step_index")
 
     summary_row = selected_summary.iloc[0].to_dict()
+    quality_flags = build_quality_flags(summary_row, quality_context)
+    quality_status, quality_css = quality_status_from_flags(quality_flags)
 
     speed = numeric_series(selected_steps, "det_speed_norm_per_sec")
     vertical_velocity = numeric_series(selected_steps, "det_vy_norm_per_sec")
@@ -522,6 +712,10 @@ def load_optical_flow_clip_explorer_data(selected_clip_group=""):
         "peak_accel": safe_float(summary_row.get("det_accel_max", 0.0)),
         "max_downward_flow": safe_float(summary_row.get("max_downward_flow", 0.0)),
         "max_upward_flow": safe_float(summary_row.get("max_upward_flow", 0.0)),
+        "quality_flags": quality_flags,
+        "quality_status": quality_status,
+        "quality_css": quality_css,
+        "quality_flag_count": len(quality_flags),
     }
 
     return {
