@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Optical Flow Clip Explorer - DroneAI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            padding: 0;
+            color: #111827;
+        }
+
+        .page {
+            max-width: 1450px;
+            margin: 0 auto;
+            padding: 28px;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 22px;
+        }
+
+        .topbar h1 {
+            margin: 0;
+            font-size: 30px;
+        }
+
+        .topbar-links a {
+            text-decoration: none;
+            background: #111827;
+            color: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-left: 8px;
+        }
+
+        .subtitle {
+            color: #4b5563;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .section {
+            background: white;
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
+        }
+
+        .section h2 {
+            margin-top: 0;
+            font-size: 22px;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 22px;
+        }
+
+        .clip-list {
+            max-height: 720px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+        }
+
+        .clip-item {
+            display: block;
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+            text-decoration: none;
+            color: #111827;
+            background: white;
+        }
+
+        .clip-item:hover {
+            background: #f3f4f6;
+        }
+
+        .clip-item.active {
+            background: #eff6ff;
+            border-left: 5px solid #2563eb;
+        }
+
+        .clip-label {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .clip-small {
+            font-size: 12px;
+            color: #4b5563;
+            word-break: break-word;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .card-title {
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        .card-value {
+            font-size: 22px;
+            font-weight: bold;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+
+        .chart-card {
+            border: 1px solid #e5e7eb;
+            background: #fafafa;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .chart-title {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .chart-subtitle {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 10px;
+            line-height: 1.4;
+        }
+
+        svg {
+            width: 100%;
+            height: auto;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .line {
+            fill: none;
+            stroke: #2563eb;
+            stroke-width: 3;
+        }
+
+        .zero-line {
+            stroke: #ef4444;
+            stroke-width: 1.5;
+            stroke-dasharray: 5 5;
+        }
+
+        .axis-text {
+            font-size: 11px;
+            fill: #374151;
+        }
+
+        .trajectory-line {
+            fill: none;
+            stroke: #16a34a;
+            stroke-width: 3;
+        }
+
+        .start-dot {
+            fill: #2563eb;
+        }
+
+        .end-dot {
+            fill: #dc2626;
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .debug-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fafafa;
+        }
+
+        .debug-card img {
+            width: 100%;
+            display: block;
+        }
+
+        .debug-caption {
+            padding: 10px;
+            font-size: 12px;
+            color: #4b5563;
+            word-break: break-word;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th, td {
+            padding: 9px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+        }
+
+        th {
+            background: #f9fafb;
+        }
+
+        .table-scroll {
+            max-height: 420px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+        }
+
+        .note {
+            background: #eff6ff;
+            color: #1e3a8a;
+            padding: 14px;
+            border-radius: 10px;
+            line-height: 1.5;
+            margin-bottom: 18px;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 16px;
+            border-radius: 10px;
+        }
+
+        @media (max-width: 1000px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            .cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .image-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <div class="topbar">
+        <div>
+            <h1>Optical Flow Clip Explorer</h1>
+            <div class="subtitle">
+                Inspect individual clips using velocity-style curves, optical-flow magnitude, acceleration, trajectory, and debug images.
+            </div>
+        </div>
+        <div class="topbar-links">
+            <a href="{{ url_for('optical_flow_dashboard') }}">Flow Dashboard</a>
+            <a href="/">Main Dashboard</a>
+        </div>
+    </div>
+
+    {% if not data.available %}
+        <div class="error">
+            {{ data.message }}
+        </div>
+    {% else %}
+
+    <div class="layout">
+
+        <div class="section">
+            <h2>Clips</h2>
+            <div class="clip-list">
+                {% for clip in data.clip_list %}
+                    <a class="clip-item {% if clip.clip_group == data.selected.clip_group %}active{% endif %}"
+                       href="{{ url_for('optical_flow_clip_explorer', clip_group=clip.clip_group) }}">
+                        <div class="clip-label">{{ clip.label }}</div>
+                        <div class="clip-small">{{ clip.clip_filename }}</div>
+                        <div class="clip-small">ROI: {{ "%.1f"|format(clip.roi_available_rate * 100) }}% | Both: {{ "%.1f"|format(clip.both_detected_rate * 100) }}%</div>
+                        <div class="clip-small">Peak speed: {{ "%.4f"|format(clip.peak_detected_speed) }}</div>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div>
+
+            <div class="section">
+                <h2>Selected Clip</h2>
+
+                <div class="note">
+                    These are normalized image-motion values, not real-world meters per second.
+                    Positive vertical velocity means the drone moved downward in image coordinates.
+                    Negative vertical velocity means upward movement.
+                </div>
+
+                <p><b>Label:</b> {{ data.selected.label }}</p>
+                <p><b>Session:</b> {{ data.selected.session_name }}</p>
+                <p><b>Clip file:</b> {{ data.selected.clip_filename }}</p>
+                <p><b>Clip group:</b> {{ data.selected.clip_group }}</p>
+
+                <div class="cards">
+                    <div class="card">
+                        <div class="card-title">Steps</div>
+                        <div class="card-value">{{ data.selected.steps }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">ROI Rate</div>
+                        <div class="card-value">{{ "%.1f"|format(data.selected.roi_available_rate * 100) }}%</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Both-Detected Rate</div>
+                        <div class="card-value">{{ "%.1f"|format(data.selected.both_detected_rate * 100) }}%</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Peak Detected Speed</div>
+                        <div class="card-value">{{ "%.4f"|format(data.selected.peak_detected_speed) }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Avg Detected Speed</div>
+                        <div class="card-value">{{ "%.4f"|format(data.selected.avg_detected_speed) }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Avg Flow Speed</div>
+                        <div class="card-value">{{ "%.4f"|format(data.selected.avg_flow_speed) }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Peak Acceleration</div>
+                        <div class="card-value">{{ "%.4f"|format(data.selected.peak_accel) }}</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Avg Acceleration</div>
+                        <div class="card-value">{{ "%.4f"|format(data.selected.avg_accel) }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Motion Curves</h2>
+
+                <div class="chart-grid">
+                    {% for chart in data.charts %}
+                        <div class="chart-card">
+                            <div class="chart-title">{{ chart.title }}</div>
+                            <div class="chart-subtitle">{{ chart.subtitle }}</div>
+
+                            {% if chart.available %}
+                                <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}">
+                                    {% if chart.zero_line_y %}
+                                        <line class="zero-line"
+                                              x1="0"
+                                              y1="{{ chart.zero_line_y }}"
+                                              x2="{{ chart.width }}"
+                                              y2="{{ chart.zero_line_y }}"></line>
+                                    {% endif %}
+
+                                    <polyline class="line" points="{{ chart.points }}"></polyline>
+
+                                    <text class="axis-text" x="8" y="15">max {{ "%.4f"|format(chart.max_value) }}</text>
+                                    <text class="axis-text" x="8" y="{{ chart.height - 8 }}">min {{ "%.4f"|format(chart.min_value) }}</text>
+                                    <text class="axis-text" x="{{ chart.width - 135 }}" y="15">mean {{ "%.4f"|format(chart.mean_value) }}</text>
+                                </svg>
+                            {% else %}
+                                <div class="error">No chart data available.</div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+
+                    <div class="chart-card">
+                        <div class="chart-title">Relative Drone Trajectory</div>
+                        <div class="chart-subtitle">
+                            This is a relative path reconstructed from detected-center movement.
+                            It is useful for visualizing direction, not real-world position.
+                        </div>
+
+                        {% if data.trajectory.available %}
+                            <svg viewBox="0 0 {{ data.trajectory.width }} {{ data.trajectory.height }}">
+                                <polyline class="trajectory-line" points="{{ data.trajectory.points }}"></polyline>
+                                <circle class="start-dot" cx="{{ data.trajectory.start_x }}" cy="{{ data.trajectory.start_y }}" r="6"></circle>
+                                <circle class="end-dot" cx="{{ data.trajectory.end_x }}" cy="{{ data.trajectory.end_y }}" r="6"></circle>
+                                <text class="axis-text" x="10" y="18">blue=start, red=end</text>
+                            </svg>
+                        {% else %}
+                            <div class="error">No trajectory data available.</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Optical Flow Debug Images</h2>
+
+                <div class="note">
+                    Green box = drone in current frame.
+                    Yellow/orange box = drone in next frame.
+                    Blue box = optical-flow ROI.
+                    Red arrow = detected drone center movement.
+                </div>
+
+                {% if data.debug_images %}
+                    <div class="image-grid">
+                        {% for img in data.debug_images %}
+                            <div class="debug-card">
+                                <img src="{{ url_for('optical_flow_debug_image', filename=img) }}" alt="{{ img }}">
+                                <div class="debug-caption">{{ img }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="error">
+                        No debug images found for this clip. This may happen if this clip was not included in the first debug-image export limit.
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="section">
+                <h2>Per-Step Motion Values</h2>
+
+                <div class="table-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Step</th>
+                                <th>ROI</th>
+                                <th>Both Detected</th>
+                                <th>Speed</th>
+                                <th>VX</th>
+                                <th>VY</th>
+                                <th>Flow Mag</th>
+                                <th>Flow DY</th>
+                                <th>Conf A</th>
+                                <th>Conf B</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in data.step_rows %}
+                                <tr>
+                                    <td>{{ row.step_index }}</td>
+                                    <td>{{ row.roi_available }}</td>
+                                    <td>{{ row.both_detected }}</td>
+                                    <td>{{ "%.4f"|format(row.det_speed_norm_per_sec) }}</td>
+                                    <td>{{ "%.4f"|format(row.det_vx_norm_per_sec) }}</td>
+                                    <td>{{ "%.4f"|format(row.det_vy_norm_per_sec) }}</td>
+                                    <td>{{ "%.4f"|format(row.flow_mag_norm_per_sec) }}</td>
+                                    <td>{{ "%.4f"|format(row.flow_dy_norm_per_sec) }}</td>
+                                    <td>{{ "%.2f"|format(row.conf_a) }}</td>
+                                    <td>{{ "%.2f"|format(row.conf_b) }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+</body>
+</html>
