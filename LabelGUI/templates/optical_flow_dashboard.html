@@ -232,7 +232,10 @@
                 Visual summary of drone-region optical flow, detected-center motion, velocity-style features, and debug outputs.
             </div>
         </div>
-        <a href="/">Back to Dashboard</a>
+        <div>
+            <a href="{{ url_for('optical_flow_clip_explorer') }}">Clip Explorer</a>
+            <a href="/">Back to Dashboard</a>
+        </div>
     </div>
 
     {% if not data.available %}
