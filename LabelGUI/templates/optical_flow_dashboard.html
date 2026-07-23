@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Optical Flow Analysis - DroneAI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            padding: 0;
+            color: #1f2937;
+        }
+
+        .page {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 28px;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .topbar h1 {
+            margin: 0;
+            font-size: 30px;
+        }
+
+        .topbar a {
+            text-decoration: none;
+            background: #111827;
+            color: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .subtitle {
+            color: #4b5563;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin: 24px 0;
+        }
+
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
+        }
+
+        .card-title {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .card-value {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .section {
+            background: white;
+            border-radius: 14px;
+            padding: 22px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
+        }
+
+        .section h2 {
+            margin-top: 0;
+            font-size: 22px;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+
+        .chart {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            background: #fafafa;
+        }
+
+        .chart h3 {
+            margin-top: 0;
+            font-size: 17px;
+        }
+
+        .bar-row {
+            display: grid;
+            grid-template-columns: 110px 1fr 70px;
+            gap: 10px;
+            align-items: center;
+            margin: 10px 0;
+        }
+
+        .bar-label {
+            font-size: 14px;
+            color: #374151;
+        }
+
+        .bar-bg {
+            height: 18px;
+            background: #e5e7eb;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            background: #2563eb;
+            border-radius: 20px;
+        }
+
+        .bar-value {
+            text-align: right;
+            font-size: 13px;
+            color: #374151;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+        }
+
+        th {
+            background: #f9fafb;
+            color: #374151;
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .debug-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fafafa;
+        }
+
+        .debug-card img {
+            width: 100%;
+            display: block;
+        }
+
+        .debug-caption {
+            padding: 10px;
+            font-size: 12px;
+            color: #4b5563;
+            word-break: break-word;
+        }
+
+        .legend {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .legend-item {
+            background: #f9fafb;
+            border-radius: 10px;
+            padding: 10px;
+            font-size: 13px;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 16px;
+            border-radius: 10px;
+        }
+
+        .note {
+            background: #eff6ff;
+            color: #1e3a8a;
+            padding: 14px;
+            border-radius: 10px;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 900px) {
+            .cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .chart-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .image-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .legend {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+
+    <div class="topbar">
+        <div>
+            <h1>Optical Flow Analysis</h1>
+            <div class="subtitle">
+                Visual summary of drone-region optical flow, detected-center motion, velocity-style features, and debug outputs.
+            </div>
+        </div>
+        <a href="/">Back to Dashboard</a>
+    </div>
+
+    {% if not data.available %}
+        <div class="error">
+            {{ data.message }}
+        </div>
+    {% else %}
+
+        <div class="cards">
+            {% for card in data.cards %}
+                <div class="card">
+                    <div class="card-title">{{ card.title }}</div>
+                    <div class="card-value">{{ card.value }}</div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="section">
+            <h2>What This Shows</h2>
+            <div class="note">
+                This page uses the saved optical-flow results from <b>flow_v1</b>.
+                The speeds shown here are normalized image-motion values, not real-world meters per second.
+                They are useful for comparing motion patterns between takeoff, landing, minor crash, and severe crash clips.
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><b>ROI Available Rate:</b> how often a usable drone-focused region was available.</div>
+                <div class="legend-item"><b>Both-Detected Rate:</b> how often the drone was detected in both consecutive frames.</div>
+                <div class="legend-item"><b>Detected-Center Speed:</b> movement of the detected drone center over time.</div>
+                <div class="legend-item"><b>Optical-Flow Speed:</b> pixel motion inside the drone-focused region.</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Class Motion Summary</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Label</th>
+                        <th>Clips</th>
+                        <th>ROI Rate</th>
+                        <th>Both-Detected Rate</th>
+                        <th>Avg Flow Speed</th>
+                        <th>Avg Detected Speed</th>
+                        <th>Peak Detected Speed</th>
+                        <th>Avg Acceleration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in data.class_stats %}
+                        <tr>
+                            <td><b>{{ row.label }}</b></td>
+                            <td>{{ row.clips }}</td>
+                            <td>{{ "%.2f"|format(row.roi_available_rate * 100) }}%</td>
+                            <td>{{ "%.2f"|format(row.both_detected_rate * 100) }}%</td>
+                            <td>{{ "%.4f"|format(row.avg_flow_speed) }}</td>
+                            <td>{{ "%.4f"|format(row.avg_detected_speed) }}</td>
+                            <td>{{ "%.4f"|format(row.peak_detected_speed) }}</td>
+                            <td>{{ "%.4f"|format(row.avg_detected_accel) }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Motion Visualizations by Class</h2>
+            <div class="chart-grid">
+                {% for chart in data.charts %}
+                    <div class="chart">
+                        <h3>{{ chart.title }}</h3>
+
+                        {% for bar in chart.bars %}
+                            <div class="bar-row">
+                                <div class="bar-label">{{ bar.label }}</div>
+                                <div class="bar-bg">
+                                    <div class="bar-fill" style="width: {{ bar.width }}%;"></div>
+                                </div>
+                                <div class="bar-value">{{ bar.display }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Optical Flow Debug Examples</h2>
+            <p class="subtitle">
+                These images show the drone detection boxes, optical-flow region, and detected drone movement arrow.
+                This is the first visual check that the optical-flow pipeline is focusing on the right area.
+            </p>
+
+            <div class="legend">
+                <div class="legend-item"><b>Green box:</b> drone in current frame</div>
+                <div class="legend-item"><b>Yellow/orange box:</b> drone in next frame</div>
+                <div class="legend-item"><b>Blue box:</b> optical-flow region</div>
+                <div class="legend-item"><b>Red arrow:</b> detected center movement</div>
+            </div>
+
+            <br>
+
+            {% if data.debug_images %}
+                <div class="image-grid">
+                    {% for img in data.debug_images %}
+                        <div class="debug-card">
+                            <img src="{{ url_for('optical_flow_debug_image', filename=img) }}" alt="{{ img }}">
+                            <div class="debug-caption">{{ img }}</div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="error">
+                    No debug images found. Expected folder: {{ data.files.debug_dir }}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="section">
+            <h2>Source Files</h2>
+            <table>
+                <tbody>
+                    <tr>
+                        <th>Run Summary</th>
+                        <td>{{ data.files.run_summary }}</td>
+                    </tr>
+                    <tr>
+                        <th>Clip Summary</th>
+                        <td>{{ data.files.clip_summary }}</td>
+                    </tr>
+                    <tr>
+                        <th>Debug Images</th>
+                        <td>{{ data.files.debug_dir }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    {% endif %}
+</div>
+</body>
+</html>
