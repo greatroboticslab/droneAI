@@ -10,6 +10,7 @@ from frame_extraction_backend import (
 )
 from optical_flow_gui_backend import (
     load_optical_flow_dashboard_data,
+    load_optical_flow_clip_explorer_data,
     OPTICAL_FLOW_DEBUG_DIR,
 )
 import os
@@ -1253,6 +1254,12 @@ def vit_results_page():
 def optical_flow_dashboard():
     data = load_optical_flow_dashboard_data()
     return render_template("optical_flow_dashboard.html", data=data)
+
+@app.route("/optical_flow/clip")
+def optical_flow_clip_explorer():
+    selected_clip_group = request.args.get("clip_group", "")
+    data = load_optical_flow_clip_explorer_data(selected_clip_group=selected_clip_group)
+    return render_template("optical_flow_clip_explorer.html", data=data)
 
 
 @app.route("/optical_flow/debug/<path:filename>")
