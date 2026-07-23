@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session, send_file
+from flask import Flask, render_template, request, Response, redirect, url_for, jsonify, session, send_file, send_from_directory, abort
 from agent_tools import overall_agent_status, install_package, mqtt_package_status
 from vit_results_backend import list_vit_runs, load_vit_run
 from frame_extraction_backend import (
@@ -7,6 +7,10 @@ from frame_extraction_backend import (
     extract_frames_from_session,
     extract_frames_from_uploaded_clip_folder,
     FRAME_DATASET_DIR,
+)
+from optical_flow_gui_backend import (
+    load_optical_flow_dashboard_data,
+    OPTICAL_FLOW_DEBUG_DIR,
 )
 import os
 import logging
@@ -1244,6 +1248,26 @@ def vit_results_page():
         run_data=run_data,
         error=error,
     )
+
+@app.route("/optical_flow")
+def optical_flow_dashboard():
+    data = load_optical_flow_dashboard_data()
+    return render_template("optical_flow_dashboard.html", data=data)
+
+
+@app.route("/optical_flow/debug/<path:filename>")
+def optical_flow_debug_image(filename):
+    debug_dir = OPTICAL_FLOW_DEBUG_DIR.resolve()
+    requested_path = (debug_dir / filename).resolve()
+
+    # Prevent someone from requesting files outside the debug image folder.
+    if debug_dir not in requested_path.parents and requested_path != debug_dir:
+        abort(404)
+
+    if not requested_path.exists():
+        abort(404)
+
+    return send_from_directory(debug_dir, filename)
 
 
 if __name__ == "__main__":
