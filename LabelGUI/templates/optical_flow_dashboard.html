@@ -287,14 +287,12 @@
                 <tbody>
                     {% for row in data.class_stats %}
                         <tr>
-                            <td><b>{{ row.label }}</b></td>
-                            <td>{{ row.clips }}</td>
-                            <td>{{ "%.2f"|format(row.roi_available_rate * 100) }}%</td>
-                            <td>{{ "%.2f"|format(row.both_detected_rate * 100) }}%</td>
-                            <td>{{ "%.4f"|format(row.avg_flow_speed) }}</td>
-                            <td>{{ "%.4f"|format(row.avg_detected_speed) }}</td>
-                            <td>{{ "%.4f"|format(row.peak_detected_speed) }}</td>
-                            <td>{{ "%.4f"|format(row.avg_detected_accel) }}</td>
+                            <td>{{ "%.2f"|format((row.roi_available_rate or 0) * 100) }}%</td>
+                            <td>{{ "%.2f"|format((row.both_detected_rate or 0) * 100) }}%</td>
+                            <td>{{ "%.4f"|format(row.avg_flow_speed or 0) }}</td>
+                            <td>{{ "%.4f"|format(row.avg_detected_speed or 0) }}</td>
+                            <td>{{ "%.4f"|format(row.peak_detected_speed or 0) }}</td>
+                            <td>{{ "%.4f"|format(row.avg_detected_accel or 0) }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>
