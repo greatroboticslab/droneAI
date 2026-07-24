@@ -253,6 +253,79 @@
             border-radius: 10px;
         }
 
+                .quality-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+
+        .quality-ok {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .quality-check {
+            background: #fef9c3;
+            color: #854d0e;
+        }
+
+        .quality-review {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .quality-panel {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            background: #fafafa;
+            margin-top: 16px;
+            margin-bottom: 18px;
+        }
+
+        .flag-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .flag-card {
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            background: white;
+        }
+
+        .flag-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .flag-detail {
+            font-size: 13px;
+            color: #4b5563;
+            line-height: 1.4;
+        }
+
+        .flag-review {
+            border-left: 5px solid #dc2626;
+        }
+
+        .flag-check {
+            border-left: 5px solid #f59e0b;
+        }
+
+        .flag-ok-box {
+            background: #dcfce7;
+            color: #166534;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+
         @media (max-width: 1000px) {
             .layout {
                 grid-template-columns: 1fr;
@@ -306,6 +379,12 @@
                         <div class="clip-small">{{ clip.clip_filename }}</div>
                         <div class="clip-small">ROI: {{ "%.1f"|format(clip.roi_available_rate * 100) }}% | Both: {{ "%.1f"|format(clip.both_detected_rate * 100) }}%</div>
                         <div class="clip-small">Peak speed: {{ "%.4f"|format(clip.peak_detected_speed) }}</div>
+                        <div class="clip-small">
+                            Quality:
+                            <span class="quality-badge quality-{{ clip.quality_css }}">
+                                {{ clip.quality_status }}{% if clip.quality_flag_count > 0 %} · {{ clip.quality_flag_count }}{% endif %}
+                            </span>
+                        </div>
                     </a>
                 {% endfor %}
             </div>
@@ -326,6 +405,32 @@
                 <p><b>Session:</b> {{ data.selected.session_name }}</p>
                 <p><b>Clip file:</b> {{ data.selected.clip_filename }}</p>
                 <p><b>Clip group:</b> {{ data.selected.clip_group }}</p>
+
+                <div class="quality-panel">
+                    <h3>Automatic Clip Quality Flags</h3>
+                
+                    <p>
+                        Status:
+                        <span class="quality-badge quality-{{ data.selected.quality_css }}">
+                            {{ data.selected.quality_status }}{% if data.selected.quality_flag_count > 0 %} · {{ data.selected.quality_flag_count }} flag(s){% endif %}
+                        </span>
+                    </p>
+                
+                    {% if data.selected.quality_flags %}
+                        <div class="flag-grid">
+                            {% for flag in data.selected.quality_flags %}
+                                <div class="flag-card flag-{{ flag.level }}">
+                                    <div class="flag-title">{{ flag.title }}</div>
+                                    <div class="flag-detail">{{ flag.detail }}</div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="flag-ok-box">
+                            No automatic issues detected for this clip. Still review the curves and debug images visually.
+                        </div>
+                    {% endif %}
+                </div>
 
                 <div class="cards">
                     <div class="card">
