@@ -1252,21 +1252,8 @@ def vit_results_page():
 
 @app.route("/optical_flow")
 def optical_flow_dashboard():
-    import traceback
-
-    try:
-        print("Loading optical flow dashboard data...")
-        data = load_optical_flow_dashboard_data()
-        print("Dashboard data loaded.")
-        print("Data type:", type(data))
-        print("Data keys:", data.keys() if isinstance(data, dict) else "not a dict")
-
-        return render_template("optical_flow_dashboard.html", data=data)
-
-    except Exception:
-        error_text = traceback.format_exc()
-        print(error_text)
-        return f"<pre>{error_text}</pre>", 500
+    data = load_optical_flow_dashboard_data()
+    return render_template("optical_flow_dashboard.html", data=data)
 
 @app.route("/optical_flow/clip")
 def optical_flow_clip_explorer():
