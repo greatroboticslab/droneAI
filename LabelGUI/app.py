@@ -1252,8 +1252,7 @@ def vit_results_page():
 
 @app.route("/optical_flow")
 def optical_flow_dashboard():
-    data = load_optical_flow_dashboard_data()
-    return render_template("optical_flow_dashboard.html", data=data)
+    return "OPTICAL FLOW ROUTE TEST WORKED"
 
 @app.route("/optical_flow/clip")
 def optical_flow_clip_explorer():
