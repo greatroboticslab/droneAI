@@ -1,0 +1,5 @@
+method,split,accuracy_pct,macro_f1_pct,weighted_f1_pct,source,notes
+Static ViT baseline,clip,31.58,,,historical,Static frame baseline; weak because events are motion-based.
+Farneback motion RF,clip,42.86,,,historical,Classical motion features with Random Forest.
+Farneback optical-flow LSTM,clip,52.38,,,historical,Previous optical-flow sequence baseline.
+Farneback optical-flow LSTM,session,56.25,,,historical,Previous optical-flow sequence baseline.
