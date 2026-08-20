@@ -1,0 +1,3 @@
+DPFlow tabular model experiment.
+This run summarizes each clip into physical motion statistics such as speed peaks, acceleration, vertical motion, ROI size, and confidence.
+Keep this folder for paper result tracking.

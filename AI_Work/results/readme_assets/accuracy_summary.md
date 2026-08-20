@@ -1,12 +1,14 @@
 | Method | Split | Accuracy | Macro F1 | Weighted F1 | Notes |
 |---|---:|---:|---:|---:|---|
-| Static ViT baseline | clip | 31.58% |  |  | Static-frame baseline. This was weak because the event labels depend on motion, not just one image. |
-| Farneback motion RF | clip | 42.86% |  |  | Classical motion features with Random Forest. |
-| Farneback optical-flow LSTM | clip | 52.38% |  |  | Earlier optical-flow sequence baseline. |
-| Farneback optical-flow LSTM | session | 56.25% |  |  | Earlier optical-flow sequence baseline. |
-| DPFlow optical-flow LSTM | clip | 52.38% | 52.38 | 52.72 | Uses newer DPFlow optical-flow features. ROI bug fixed. |
-| DPFlow optical-flow LSTM | session | 62.50% | 54.19 | 60.73 | Current best result. |
-| VideoMAE probe | clip | 42.86% | 35.38 | 40.43 | Frozen pretrained VideoMAE backbone; trained only classification head. |
-| VideoMAE probe | session | 37.50% | 35.0 | 35.63 | Frozen pretrained VideoMAE backbone; trained only classification head. |
-| VideoMAE full fine-tune | clip | 52.38% | 51.5 | 51.71 | Full VideoMAE fine-tuning improved over probe but did not beat DPFlow-LSTM. |
-| VideoMAE full fine-tune | session | 56.25% | 53.33 | 57.08 | Full VideoMAE fine-tuning. |
+| Static ViT baseline | clip | 31.58% | — | — | Static-frame baseline. Weak because events are motion-based. |
+| Farneback motion RF | clip | 42.86% | — | — | Classical motion features with Random Forest. |
+| Farneback optical-flow LSTM | clip | 52.38% | — | — | Previous optical-flow sequence baseline. |
+| Farneback optical-flow LSTM | session | 56.25% | — | — | Previous optical-flow sequence baseline. |
+| DPFlow optical-flow LSTM | clip | 52.38% | 52.38% | 52.72% | LSTM trained on corrected DPFlow motion sequence features. |
+| DPFlow optical-flow LSTM | session | 62.50% | 54.19% | 60.73% | Previous best accuracy result. |
+| VideoMAE probe | clip | 42.86% | 35.38% | 40.43% | Frozen pretrained VideoMAE backbone; trained only classification head. |
+| VideoMAE probe | session | 37.50% | 35.00% | 35.63% | Frozen pretrained VideoMAE backbone. |
+| VideoMAE full fine-tune | clip | 52.38% | 51.50% | 51.71% | Full VideoMAE fine-tuning improved over the frozen probe. |
+| VideoMAE full fine-tune | session | 56.25% | 53.33% | 57.08% | Full VideoMAE fine-tuning, but below DPFlow-LSTM. |
+| DPFlow tabular Random Forest | clip | 57.14% | 55.95% | 56.80% | Feature-engineered DPFlow summary statistics with a tree-based tabular model. |
+| DPFlow tabular Extra Trees | session | 62.50% | 60.00% | 63.12% | Feature-engineered DPFlow summary statistics with a tree-based tabular model. |

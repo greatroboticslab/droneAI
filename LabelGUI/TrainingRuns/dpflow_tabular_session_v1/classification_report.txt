@@ -1,0 +1,10 @@
+              precision    recall  f1-score   support
+
+        land       1.00      0.33      0.50         3
+ minor-crash       0.33      0.50      0.40         4
+severe-crash       0.67      0.67      0.67         3
+     takeoff       0.83      0.83      0.83         6
+
+    accuracy                           0.62        16
+   macro avg       0.71      0.58      0.60        16
+weighted avg       0.71      0.62      0.63        16

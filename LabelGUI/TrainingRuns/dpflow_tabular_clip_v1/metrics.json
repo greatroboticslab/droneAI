@@ -1,0 +1,73 @@
+{
+  "run_name": "dpflow_tabular_clip_v1",
+  "stage": "tabular_training",
+  "input_features_csv": "C:\\Users\\rusha\\droneAI\\LabelGUI\\OpticalFlowResults\\dpflow_drone_v1_gpu\\flow_sequence_features.csv",
+  "split_mode": "clip",
+  "seed": 42,
+  "total_clips": 83,
+  "train_clips": 62,
+  "val_clips": 21,
+  "labels": [
+    "land",
+    "minor-crash",
+    "severe-crash",
+    "takeoff"
+  ],
+  "label_counts": {
+    "minor-crash": 25,
+    "severe-crash": 24,
+    "takeoff": 22,
+    "land": 12
+  },
+  "feature_count": 712,
+  "best_model": "random_forest",
+  "accuracy": 0.5714285714285714,
+  "macro_f1": 0.5595238095238095,
+  "weighted_f1": 0.5680272108843537,
+  "all_model_results": [
+    {
+      "model": "random_forest",
+      "accuracy": 0.5714285714285714,
+      "macro_f1": 0.5595238095238095,
+      "weighted_f1": 0.5680272108843537
+    },
+    {
+      "model": "extra_trees",
+      "accuracy": 0.42857142857142855,
+      "macro_f1": 0.35064935064935066,
+      "weighted_f1": 0.4007421150278293
+    },
+    {
+      "model": "gradient_boosting",
+      "accuracy": 0.5238095238095238,
+      "macro_f1": 0.4571428571428572,
+      "weighted_f1": 0.4653061224489796
+    },
+    {
+      "model": "hist_gradient_boosting",
+      "accuracy": 0.5714285714285714,
+      "macro_f1": 0.459280303030303,
+      "weighted_f1": 0.524891774891775
+    },
+    {
+      "model": "logistic_regression",
+      "accuracy": 0.47619047619047616,
+      "macro_f1": 0.49015151515151517,
+      "weighted_f1": 0.48874458874458876
+    },
+    {
+      "model": "svm_rbf",
+      "accuracy": 0.42857142857142855,
+      "macro_f1": 0.3591346153846154,
+      "weighted_f1": 0.41043956043956037
+    },
+    {
+      "model": "xgboost",
+      "accuracy": 0.5238095238095238,
+      "macro_f1": 0.4217032967032967,
+      "weighted_f1": 0.48194662480376765
+    }
+  ],
+  "notes": "DPFlow sequence features summarized into one tabular feature vector per clip. Tree/linear/SVM baselines trained for small-data comparison against LSTM and VideoMAE.",
+  "output_dir": "C:\\Users\\rusha\\droneAI\\LabelGUI\\TrainingRuns\\dpflow_tabular_clip_v1"
+}
