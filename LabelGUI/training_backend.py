@@ -558,42 +558,21 @@ def hex_to_bgr(hex_color):
 #                                 DOWNLOAD                                    #
 ###############################################################################
 def download_video(youtube_link, download_folder):
-    os.makedirs(download_folder, exist_ok=True)
+    """
+    Delegates to the shared downloader in validation_backend so that ffmpeg
+    detection, link pre-checks and error messages stay in one place.
 
-    # NOTE: keep your existing path; later we can make it config/env-based
-    FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
+    Returns the downloaded filepath, or None on failure.
+    """
+    from validation_backend import download_video as _shared_download
 
-    ydl_opts = {
-        'format': 'bv*+ba/bestvideo*+bestaudio',
-        'outtmpl': os.path.join(download_folder, '%(title).50s-%(id)s.%(ext)s'),
-        'merge_output_format': 'mp4',
-        'noplaylist': True,
-        'quiet': True,
-        'no_warnings': True,
-        'ffmpeg_location': FFMPEG_DIR,
-        'extractor_args': {'youtube': {'player_client': ['android']}},
-        'retries': 5,
-        'concurrent_fragment_downloads': 4,
-    }
+    path, error, detail = _shared_download(youtube_link, download_folder)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_link, download=True)
-            # Try to resolve output filename
-            try:
-                p = ydl.prepare_filename(info)
-                base, _ = os.path.splitext(p)
-                mp4 = base + ".mp4"
-                if os.path.exists(mp4):
-                    return mp4
-                if os.path.exists(p):
-                    return p
-            except Exception:
-                pass
-    except Exception as e:
-        print("DEBUG: download_video failed:", e)
+    if not path:
+        print("DEBUG: download_video failed:", error, "|", detail)
+        return None
 
-    return None
+    return path
 
 
 ###############################################################################

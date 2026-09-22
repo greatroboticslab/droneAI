@@ -8,6 +8,7 @@ LabelGUI/YouTubeDownloads/
 LabelGUI/ValidationResults/
 LabelGUI/TrainingResults/
 LabelGUI/Uploads/
+LabelGUI/.ffmpeg_bin/
 
 # Analysis outputs
 analysis_out/
@@ -18,3 +19,8 @@ LabelGUI/db/*.sqlite
 LabelGUI/db/*.sqlite-journal
 LabelGUI/db/*.sqlite-wal
 LabelGUI/db/*.sqlite-shm
+
+videos/
+videos
+db/
+db

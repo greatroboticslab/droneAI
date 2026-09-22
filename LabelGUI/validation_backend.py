@@ -1,6 +1,7 @@
 import os
 import re
 import cv2
+import shutil
 import yt_dlp
 import threading
 import time
@@ -44,6 +45,11 @@ _done_event = None
 _cancel_event = None
 _state_lock = threading.Lock()
 
+# Download/session status surfaced to the UI (see get_validation_status)
+_download_state = "idle"      # idle | downloading | ready | failed
+_download_error = ""          # human-readable reason when state == failed
+_download_detail = ""         # raw technical detail (last yt-dlp error)
+
 CLIP_BEFORE_SEC = 2.0
 CLIP_AFTER_SEC = 1.0
 
@@ -84,6 +90,7 @@ def start_validation_thread(
     global _delete_original, _event_times, _video_duration, _current_video_file
     global _validation_sid, _target_folder, _last_youtube_link
     global _done_event, _cancel_event
+    global _download_state, _download_error, _download_detail
 
     # Cancel any previous unfinished session
     old_thread = None
@@ -132,6 +139,9 @@ def start_validation_thread(
 
     with _state_lock:
         _video_done = False
+        _download_state = "downloading"
+        _download_error = ""
+        _download_detail = ""
         _event_times = local_event_times
         _video_duration = 0.0
         _delete_original = bool(delete_original)
@@ -169,9 +179,13 @@ def start_validation_thread(
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
-    downloaded_filepath = download_video(youtube_link, youtube_downloads_dir)
+    downloaded_filepath, dl_error, dl_detail = download_video(
+        youtube_link, youtube_downloads_dir
+    )
 
     if local_cancel_event.is_set():
+        with _state_lock:
+            _download_state = "idle"
         db.finalize_validation_session(local_validation_sid, 0.0, 0, status="cancelled")
         return
 
@@ -181,20 +195,34 @@ def start_validation_thread(
     if not downloaded_filepath:
         with _state_lock:
             _video_done = True
+            _download_state = "failed"
+            _download_error = dl_error or "Download failed."
+            _download_detail = dl_detail or ""
             local_done_event.set()
 
         db.finalize_validation_session(local_validation_sid, 0.0, 0, status="failed")
 
         with open(local_log_file_path, "w", encoding="utf-8") as f:
             f.write("Download failed.\n")
+            f.write(f"Link: {youtube_link}\n")
+            f.write(f"Reason: {dl_error}\n")
+            if dl_detail:
+                f.write(f"Detail: {dl_detail}\n")
 
         metadata["status"] = "failed"
+        metadata["error"] = dl_error
+        metadata["error_detail"] = dl_detail
         metadata["finished_at"] = datetime.utcnow().isoformat()
 
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
         return
+
+    with _state_lock:
+        _download_state = "ready"
+        _download_error = ""
+        _download_detail = ""
 
     db.upsert_validation_session(
         sid=local_validation_sid,
@@ -709,12 +737,162 @@ def sanitize_folder_name(name: str) -> str:
 # -----------------------
 # Download (clean)
 # -----------------------
+_FFMPEG_SHIM_DIR = BASE_DIR / ".ffmpeg_bin"
+_ffmpeg_dir_cache = None
+
+
+def _shim_imageio_ffmpeg(exe: str):
+    """
+    imageio-ffmpeg ships its binary under a platform-specific name
+    (e.g. ffmpeg-macos-aarch64-v7.1). yt-dlp looks for a file literally named
+    "ffmpeg" inside ffmpeg_location, so expose one via a symlink.
+    """
+    try:
+        _FFMPEG_SHIM_DIR.mkdir(parents=True, exist_ok=True)
+        link = _FFMPEG_SHIM_DIR / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+
+        if link.exists() or link.is_symlink():
+            if link.is_symlink() and os.path.realpath(link) == os.path.realpath(exe):
+                return str(_FFMPEG_SHIM_DIR)
+            link.unlink()
+
+        if os.name == "nt":
+            shutil.copy2(exe, link)
+        else:
+            link.symlink_to(exe)
+
+        os.chmod(exe, 0o755)
+        return str(_FFMPEG_SHIM_DIR)
+    except Exception as e:
+        print("[ffmpeg] could not create shim:", e)
+        return None
+
+
+def _find_ffmpeg_dir():
+    """
+    Locate an ffmpeg binary in a portable way.
+
+    Order: PATH -> imageio-ffmpeg's bundled static binary -> None.
+    Returns a directory containing an executable named "ffmpeg", or None.
+    """
+    global _ffmpeg_dir_cache
+
+    if _ffmpeg_dir_cache is not None:
+        return _ffmpeg_dir_cache or None
+
+    exe = shutil.which("ffmpeg")
+    if exe:
+        _ffmpeg_dir_cache = os.path.dirname(exe)
+        return _ffmpeg_dir_cache
+
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            shim = _shim_imageio_ffmpeg(exe)
+            if shim:
+                _ffmpeg_dir_cache = shim
+                return shim
+    except Exception:
+        pass
+
+    _ffmpeg_dir_cache = ""
+    return None
+
+
+def has_ffmpeg():
+    return _find_ffmpeg_dir() is not None
+
+
+def _friendly_download_error(raw: str, youtube_link: str) -> str:
+    """
+    Turn a raw yt-dlp/network error into something a labeler can act on.
+    """
+    text = (raw or "").lower()
+
+    if "certificate_verify_failed" in text or "certificate verify failed" in text:
+        return (
+            "Could not verify HTTPS certificates. This Python install has no CA "
+            "certificate bundle. Fix it by running:  \"/Applications/Python 3.14/"
+            "Install Certificates.command\"  (or: pip install --upgrade certifi)."
+        )
+
+    if "sign in to confirm" in text or "bot" in text and "confirm" in text:
+        return (
+            "YouTube asked for sign-in / bot confirmation for this video. "
+            "It cannot be downloaded anonymously."
+        )
+
+    if "private video" in text:
+        return "This video is private and cannot be downloaded."
+
+    if ("video unavailable" in text
+            or "not available" in text
+            or "removed by the uploader" in text
+            or "has been terminated" in text):
+        return (
+            "This video is no longer available on YouTube (removed, private, or "
+            "region-blocked). Update the link in the Excel sheet."
+        )
+
+    if "age" in text and "restrict" in text:
+        return "This video is age-restricted and cannot be downloaded anonymously."
+
+    if "unsupported url" in text or "no video formats" in text:
+        return f"No downloadable video found at this link: {youtube_link}"
+
+    if "ffmpeg" in text:
+        return (
+            "ffmpeg is required to merge the video and audio streams but was not "
+            "found. Install it with 'brew install ffmpeg' or "
+            "'pip install imageio-ffmpeg'."
+        )
+
+    if "timed out" in text or "timeout" in text or "connection" in text:
+        return "Network problem while downloading. Check your internet connection."
+
+    return "Download failed. See details below."
+
+
+def _precheck_link(youtube_link: str):
+    """
+    Reject links yt-dlp can never handle, before wasting time on attempts.
+    Returns a friendly error string, or None if the link looks downloadable.
+    """
+    url = (youtube_link or "").strip()
+
+    if not url:
+        return "No video link was provided for this row."
+
+    if not url.lower().startswith(("http://", "https://")):
+        return f"This does not look like a valid URL: {url}"
+
+    if "drive.google.com" in url.lower() and "/folders/" in url.lower():
+        return (
+            "This link is a Google Drive FOLDER, not a video file. Replace it in "
+            "the Excel sheet with a direct link to a single video."
+        )
+
+    return None
+
+
 def download_video(youtube_link, download_folder):
+    """
+    Download the video behind `youtube_link` into `download_folder`.
+
+    Returns (filepath, error_message, error_detail).
+    On success error_message and error_detail are empty strings.
+    """
     os.makedirs(download_folder, exist_ok=True)
+
+    precheck = _precheck_link(youtube_link)
+    if precheck:
+        print(f"[download_video] rejected link: {precheck}")
+        return None, precheck, youtube_link
+
     youtube_link = _normalize_youtube_url(youtube_link)
 
-    # NOTE: keep your existing path (we can move this later)
-    FFMPEG_DIR = r"C:\Users\rusha\Downloads\ffmpeg-8.0-essentials_build\ffmpeg-8.0-essentials_build\bin"
+    ffmpeg_dir = _find_ffmpeg_dir()
 
     base_opts = {
         "outtmpl": os.path.join(download_folder, "%(title).50s-%(id)s.%(ext)s"),
@@ -722,18 +900,30 @@ def download_video(youtube_link, download_folder):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "ffmpeg_location": FFMPEG_DIR,
-        "extractor_args": {"youtube": {"player_client": ["android"]}},
+        "noprogress": True,
         "retries": 5,
         "concurrent_fragment_downloads": 4,
     }
 
-    strategies = [
-        "bv*+ba/bestvideo*+bestaudio",
-        "best[ext=mp4]",
-        "18",
-        "best",
-    ]
+    if ffmpeg_dir:
+        base_opts["ffmpeg_location"] = ffmpeg_dir
+
+    if ffmpeg_dir:
+        # ffmpeg available: best quality first, merging separate A/V streams.
+        strategies = [
+            "bv*+ba/bestvideo*+bestaudio",
+            "best[ext=mp4]",
+            "18",
+            "best",
+        ]
+    else:
+        # No ffmpeg: only pre-muxed (single-file) formats can work.
+        strategies = [
+            "best[ext=mp4][acodec!=none][vcodec!=none]",
+            "18",
+            "best[acodec!=none][vcodec!=none]",
+            "best",
+        ]
 
     def _resolve_output_paths(ydl, info):
         paths = []
@@ -767,6 +957,8 @@ def download_video(youtube_link, download_folder):
                 seen.add(p)
         return uniq
 
+    errors = []
+
     def try_with(fmt):
         opts = dict(base_opts)
         opts["format"] = fmt
@@ -777,16 +969,50 @@ def download_video(youtube_link, download_folder):
                 for p in out_paths:
                     if p.lower().endswith((".mp4", ".mkv", ".webm")) and os.path.exists(p):
                         return p
+            errors.append(f"[{fmt}] produced no playable file.")
         except Exception as e:
+            errors.append(f"[{fmt}] {e}")
             print(f"[download_video] attempt with '{fmt}' failed:", e)
         return None
 
     for fmt in strategies:
         p = try_with(fmt)
         if p:
-            return p
+            return p, "", ""
 
-    return None
+    detail = "\n".join(errors)
+
+    # "Requested format is not available" from a fallback is a symptom, not the
+    # cause - diagnose from the most specific error across all attempts.
+    diagnostic = next(
+        (e for e in errors if "ffmpeg" in e.lower()),
+        None,
+    ) or next(
+        (e for e in errors if "requested format is not available" not in e.lower()),
+        None,
+    ) or detail
+
+    if not ffmpeg_dir:
+        diagnostic += " (ffmpeg was not found on this machine)"
+
+    return None, _friendly_download_error(diagnostic, youtube_link), detail
+
+
+def get_validation_status():
+    """
+    Status of the current validation session, for the UI to poll.
+    """
+    with _state_lock:
+        return {
+            "state": _download_state,
+            "error": _download_error,
+            "detail": _download_detail,
+            "video_ready": bool(_current_video_file and os.path.exists(_current_video_file)),
+            "video_name": os.path.basename(_current_video_file) if _current_video_file else "",
+            "link": _last_youtube_link,
+            "done": bool(_video_done),
+            "ffmpeg": bool(_find_ffmpeg_dir()),
+        }
 
 
 # -----------------------

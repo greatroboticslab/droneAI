@@ -5,3 +5,5 @@ opencv-python
 yt-dlp
 ultralytics
 numpy
+certifi
+imageio-ffmpeg

@@ -237,3 +237,106 @@ tr:hover td{
   height: auto;
   display:block;
 }
+
+/* ========== Toasts / status popups ========== */
+#toast-stack{
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, calc(100vw - 36px));
+  pointer-events: none;
+}
+
+.toast{
+  pointer-events: auto;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 0.92em;
+  line-height: 1.45;
+  opacity: 0;
+  transform: translateX(16px);
+  transition: opacity .22s ease, transform .22s ease;
+  word-break: break-word;
+}
+.toast.toast--in{ opacity: 1; transform: translateX(0); }
+
+.toast--success{ border-left-color: #22c55e; }
+.toast--error{   border-left-color: #ef4444; }
+.toast--warning{ border-left-color: #f59e0b; }
+.toast--info{    border-left-color: #2563eb; }
+
+.toast__body{ flex: 1; min-width: 0; }
+.toast__title{ font-weight: 700; }
+.toast__msg{ color: var(--muted); margin-top: 3px; }
+.toast__detail{
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+  color: rgba(229,231,235,0.55);
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.toast__close{
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: rgba(229,231,235,0.45);
+  cursor: pointer;
+  font-size: 1.25em;
+  padding: 0;
+  margin: -2px -2px 0 0;
+  line-height: 1;
+}
+.toast__close:hover{ color: var(--text); }
+
+/* Blocking status panel used while a video is being fetched */
+.statusPanel{
+  display: none;
+  padding: 22px;
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+.statusPanel.is-visible{ display: block; }
+.statusPanel--error{ border-color: rgba(239,68,68,0.45); }
+.statusPanel__title{ margin: 0 0 8px; font-size: 1.1em; font-weight: 800; }
+.statusPanel__msg{ margin: 0; color: var(--muted); }
+.statusPanel__detail{
+  margin-top: 14px;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8em;
+  color: rgba(229,231,235,0.55);
+  background: rgba(0,0,0,0.30);
+  padding: 10px 12px;
+  border-radius: 8px;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.statusPanel__actions{ margin-top: 16px; display: flex; gap: 10px; justify-content: center; }
+
+.spinner{
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 14px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin{ to{ transform: rotate(360deg); } }

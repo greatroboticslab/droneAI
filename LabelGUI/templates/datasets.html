@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Dataset Manager</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='toast.js') }}"></script>
 </head>
 <body>
 <header class="topbar">
@@ -26,10 +27,7 @@
     <section class="card">
       <h2>Upload New Dataset</h2>
 
-      {% if message %}<p><b>{{ message }}</b></p>{% endif %}
-      {% if error %}<p style="color:#ef4444;"><b>{{ error }}</b></p>{% endif %}
-
-      <form method="POST" action="/datasets" enctype="multipart/form-data">
+      <form id="upload-form" method="POST" action="/datasets" enctype="multipart/form-data">
         <label>Dataset Name</label>
         <input name="dataset_name" placeholder="Dataset name">
 
@@ -42,7 +40,7 @@
         </label>
 
         <div class="actions actions--big">
-          <button class="btn btn--primary" type="submit">Upload Dataset</button>
+          <button id="upload-btn" class="btn btn--primary" type="submit">Upload Dataset</button>
         </div>
       </form>
     </section>
@@ -91,5 +89,77 @@
     </section>
   </div>
 </main>
+
+<script>
+  // Server-rendered outcome of the previous upload, surfaced as a popup.
+  const uploadMessage = {{ (message or '')|tojson }};
+  const uploadError = {{ (error or '')|tojson }};
+
+  if (uploadMessage) {
+    showToast({
+      type: 'success',
+      message: uploadMessage
+    });
+  }
+
+  if (uploadError) {
+    showToast({
+      type: 'error',
+      title: "That file didn't load",
+      message: uploadError,
+      duration: 0
+    });
+  }
+
+  // Immediate feedback while the file is being sent.
+  const uploadForm = document.getElementById('upload-form');
+  const uploadBtn = document.getElementById('upload-btn');
+  const fileInput = uploadForm.querySelector('input[type="file"]');
+
+  uploadForm.addEventListener('submit', (e) => {
+    const file = fileInput.files && fileInput.files[0];
+
+    if (!file) {
+      e.preventDefault();
+      showToast({
+        type: 'warning',
+        message: 'Pick an Excel file first'
+      });
+      return;
+    }
+
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      e.preventDefault();
+      showToast({
+        type: 'error',
+        message: file.name + ' is not an Excel file - needs .xlsx or .xls'
+      });
+      return;
+    }
+
+    // Defer: disabling inside the submit handler can cancel the submission.
+    setTimeout(() => {
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = 'Uploading…';
+    }, 0);
+
+    showToast({
+      type: 'info',
+      message: 'Uploading ' + file.name + '…',
+      duration: 0
+    });
+  });
+
+  // Confirm "Make Active" actions too.
+  document.querySelectorAll('form[action^="/datasets/set_active/"]').forEach(f => {
+    f.addEventListener('submit', () => {
+      showToast({
+        type: 'info',
+        message: 'Switching dataset…',
+        duration: 0
+      });
+    });
+  });
+</script>
 </body>
 </html>

@@ -3,6 +3,7 @@
 <head>
   <title>Validation</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='toast.js') }}"></script>
   <style>
     #done-overlay {
       display: none;
@@ -23,45 +24,63 @@
     #done-buttons button {
       margin-right: 10px;
     }
+    #player-area.is-hidden { display: none; }
   </style>
 </head>
 <body>
 <div class="container">
   <h1>Validation</h1>
 
-  <div>
-    <img id="video-feed"
-         src="{{ url_for('validation_video_feed') }}"
-         alt="Video stream"
-         style="width:100%; max-height:480px; object-fit:contain; border:1px solid #ccc;">
+  <!-- Shown while the video is being fetched, or if the fetch failed -->
+  <div id="status-panel" class="statusPanel">
+    <div id="status-spinner" class="spinner"></div>
+    <p id="status-title" class="statusPanel__title">Getting the video…</p>
+    <p id="status-msg" class="statusPanel__msg">This usually takes under a minute.</p>
+    <div id="status-detail" class="statusPanel__detail" style="display:none;"></div>
+    <div id="status-actions" class="statusPanel__actions" style="display:none;">
+      {% if source == 'excel' or source == 'dataset' %}
+        <button class="btn btn--primary" type="button"
+                onclick="window.location.href='{{ url_for('queue_page') }}'">
+          Back to Queue
+        </button>
+      {% endif %}
+      <button class="btn btn--secondary" type="button"
+              onclick="window.location.href='{{ url_for('home_page') }}'">
+        Dashboard
+      </button>
+    </div>
   </div>
 
-  <p style="margin-top:6px; font-size:0.9em; color:#9ca3af;">
-    If the video does not appear right away, please wait a moment.
-  </p>
+  <div id="player-area" class="is-hidden">
+    <div>
+      <img id="video-feed"
+           alt="Video stream"
+           style="width:100%; max-height:480px; object-fit:contain; border:1px solid #ccc;">
+    </div>
 
-  <div style="margin-top: 10px;">
-    <button id="rewind-btn">Rewind 10s</button>
-    <button id="pause-btn">Pause / Resume</button>
-    <button id="forward-btn">Forward 10s</button>
+    <div style="margin-top: 10px;">
+      <button id="rewind-btn">Rewind 10s</button>
+      <button id="pause-btn">Pause / Resume</button>
+      <button id="forward-btn">Forward 10s</button>
+    </div>
+
+    <hr>
+
+    <h2>Events</h2>
+    <div style="margin-bottom: 12px;">
+      <button class="event-btn" data-event="takeoff">Take-off</button>
+      <button class="event-btn" data-event="land">Land</button>
+      <button class="event-btn" data-event="minor-crash">Minor Crash</button>
+      <button class="event-btn" data-event="severe-crash">Severe Crash</button>
+    </div>
+
+    <p>Events Marked: <span id="event-count">0</span></p>
   </div>
-
-  <hr>
-
-  <h2>Events</h2>
-  <div style="margin-bottom: 12px;">
-    <button class="event-btn" data-event="takeoff">Take-off</button>
-    <button class="event-btn" data-event="land">Land</button>
-    <button class="event-btn" data-event="minor-crash">Minor Crash</button>
-    <button class="event-btn" data-event="severe-crash">Severe Crash</button>
-  </div>
-
-  <p>Events Marked: <span id="event-count">0</span></p>
 
   <div id="done-overlay">
-    <h2>Session Complete</h2>
+    <h2>All done</h2>
     <p id="done-message">
-      Labeling is complete. Your clips and log have been saved.
+      Clips and event log saved.
     </p>
     <div id="done-buttons">
       {% if source == 'excel' or source == 'dataset' %}
@@ -89,11 +108,121 @@
   const forwardBtn = document.getElementById('forward-btn');
   const doneOverlay = document.getElementById('done-overlay');
   const doneMessage = document.getElementById('done-message');
+
+  const statusPanel = document.getElementById('status-panel');
+  const statusSpinner = document.getElementById('status-spinner');
+  const statusTitle = document.getElementById('status-title');
+  const statusMsg = document.getElementById('status-msg');
+  const statusDetail = document.getElementById('status-detail');
+  const statusActions = document.getElementById('status-actions');
+  const playerArea = document.getElementById('player-area');
+  const videoFeed = document.getElementById('video-feed');
+
   const sessionSource = "{{ source|default('manual') }}";
+  const VIDEO_FEED_URL = "{{ url_for('validation_video_feed') }}";
 
   let eventCount = 0;
   let lockReleased = false;
+  let streamStarted = false;
+  let downloadResolved = false;
 
+  const EVENT_LABELS = {
+    'takeoff': 'Take-off',
+    'land': 'Land',
+    'minor-crash': 'Minor Crash',
+    'severe-crash': 'Severe Crash'
+  };
+
+  // ---------------------------------------------------------------- download
+  function showDownloading() {
+    statusPanel.classList.add('is-visible');
+    statusPanel.classList.remove('statusPanel--error');
+    statusSpinner.style.display = 'block';
+    statusTitle.textContent = 'Getting the video…';
+    statusMsg.textContent = 'This usually takes under a minute.';
+    statusDetail.style.display = 'none';
+    statusActions.style.display = 'none';
+  }
+
+  function showDownloadFailed(status) {
+    downloadResolved = true;
+    statusPanel.classList.add('is-visible', 'statusPanel--error');
+    statusSpinner.style.display = 'none';
+    statusTitle.textContent = "This video wouldn't load";
+    statusMsg.textContent = status.error || 'The download failed.';
+
+    if (status.detail) {
+      statusDetail.style.display = 'block';
+      statusDetail.textContent = status.detail;
+    }
+    statusActions.style.display = 'flex';
+    playerArea.classList.add('is-hidden');
+
+    showToast({
+      type: 'error',
+      title: "Video wouldn't load",
+      message: status.error || 'The download failed.',
+      detail: status.detail || '',
+      duration: 0
+    });
+  }
+
+  function startStream(status) {
+    downloadResolved = true;
+    statusPanel.classList.remove('is-visible');
+    playerArea.classList.remove('is-hidden');
+
+    if (!streamStarted) {
+      streamStarted = true;
+      // Only attach the MJPEG source once we know a video actually exists,
+      // otherwise the browser sits on a blank frame forever.
+      videoFeed.src = VIDEO_FEED_URL;
+
+      showToast({
+        type: 'success',
+        message: status.video_name
+          ? ('Playing ' + status.video_name)
+          : 'Video is playing'
+      });
+
+      if (status.ffmpeg === false) {
+        showToast({
+          type: 'warning',
+          title: 'No ffmpeg on this machine',
+          message: 'Videos will download at reduced quality.',
+          duration: 9000
+        });
+      }
+    }
+  }
+
+  function pollDownload() {
+    fetch('/validation_status')
+      .then(r => r.json())
+      .then(status => {
+        if (status.state === 'failed') {
+          showDownloadFailed(status);
+          return;
+        }
+
+        if (status.state === 'ready' || status.video_ready) {
+          startStream(status);
+          return;
+        }
+
+        if (status.state === 'downloading') {
+          showDownloading();
+        }
+
+        setTimeout(pollDownload, 1500);
+      })
+      .catch(err => {
+        console.error('validation_status error:', err);
+        setTimeout(pollDownload, 3000);
+      });
+  }
+
+  // ------------------------------------------------------------------ events
   eventButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const ev = btn.getAttribute('data-event');
@@ -107,24 +236,52 @@
         if (data.success) {
           eventCount += 1;
           eventCountSpan.textContent = eventCount;
+          showToast({
+            type: 'success',
+            message: (EVENT_LABELS[ev] || ev) + ' marked',
+            duration: 2500
+          });
+        } else {
+          showToast({
+            type: 'error',
+            message: "That didn't register - try again"
+          });
         }
       })
-      .catch(err => console.error('mark_event error:', err));
+      .catch(err => {
+        console.error('mark_event error:', err);
+        showToast({
+          type: 'error',
+          message: "Lost the connection - that mark didn't save"
+        });
+      });
     });
   });
 
   pauseBtn.addEventListener('click', () => {
-    fetch('/toggle_pause', {method: 'POST'});
+    fetch('/toggle_pause', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => showToast({
+        type: 'info',
+        message: d.paused ? 'Paused' : 'Playing',
+        duration: 1800
+      }))
+      .catch(err => console.error('toggle_pause error:', err));
   });
 
   rewindBtn.addEventListener('click', () => {
-    fetch('/rewind', {method: 'POST'});
+    fetch('/rewind', {method: 'POST'})
+      .then(() => showToast({type: 'info', message: 'Back 10s', duration: 1500}))
+      .catch(err => console.error('rewind error:', err));
   });
 
   forwardBtn.addEventListener('click', () => {
-    fetch('/fast_forward', {method: 'POST'});
+    fetch('/fast_forward', {method: 'POST'})
+      .then(() => showToast({type: 'info', message: 'Ahead 10s', duration: 1500}))
+      .catch(err => console.error('fast_forward error:', err));
   });
 
+  // ------------------------------------------------------------- done polling
   function pollStatus() {
     fetch('/check_status')
       .then(r => r.text())
@@ -134,17 +291,47 @@
           if (!lockReleased) {
             lockReleased = true;
             fetch('/validation_release_lock', { method: 'POST' })
+              .then(r => r.json())
+              .then(d => {
+                if (d.released_as === 'not_labeled') {
+                  showToast({
+                    type: 'info',
+                    title: 'Put back in the queue',
+                    message: 'Nothing was saved for this row.',
+                    duration: 9000
+                  });
+                }
+              })
               .catch(err => console.error('validation_release_lock error:', err));
           }
 
-          doneOverlay.style.display = 'block';
+          // A failed download also flips the done flag. Only claim the session
+          // completed once we know a video actually played.
+          if (!streamStarted) {
+            if (!downloadResolved) {
+              // Download outcome not known yet - check again shortly.
+              setTimeout(pollStatus, 1500);
+            }
+            return;
+          }
 
-          if (sessionSource === 'excel' || sessionSource === 'dataset') {
-            doneMessage.textContent =
-              'Labeling is complete. This queue item has been saved and marked as labeled.';
-          } else {
-            doneMessage.textContent =
-              'Labeling is complete. Your clips and log have been saved.';
+          {
+            doneOverlay.style.display = 'block';
+
+            if (sessionSource === 'excel' || sessionSource === 'dataset') {
+              doneMessage.textContent =
+                'Saved. This row is marked as labeled.';
+            } else {
+              doneMessage.textContent =
+                'Clips and event log saved.';
+            }
+
+            showToast({
+              type: 'success',
+              title: 'All done',
+              message: 'Clips and event log saved.',
+              duration: 8000
+            });
           }
 
         } else {
@@ -157,6 +344,8 @@
       });
   }
 
+  showDownloading();
+  pollDownload();
   pollStatus();
 </script>
 </body>

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Shared Queue</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='toast.js') }}"></script>
 </head>
 <body>
 <header class="topbar">
@@ -120,5 +121,32 @@
     </div>
   {% endif %}
 </main>
+
+<script>
+  // Let the labeler know the click registered - fetching a video takes a while.
+  document.querySelectorAll('form[action^="/queue/start/"]').forEach(f => {
+    f.addEventListener('submit', () => {
+      const btn = f.querySelector('button[type="submit"]');
+      // Defer: disabling inside the submit handler can cancel the submission.
+      setTimeout(() => {
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Starting…';
+        }
+      }, 0);
+      showToast({
+        type: 'info',
+        message: 'Getting the video ready…',
+        duration: 0
+      });
+    });
+  });
+
+  document.querySelectorAll('form[action^="/queue/reset/"]').forEach(f => {
+    f.addEventListener('submit', () => {
+      showToast({ type: 'info', message: 'Resetting…', duration: 0 });
+    });
+  });
+</script>
 </body>
 </html>

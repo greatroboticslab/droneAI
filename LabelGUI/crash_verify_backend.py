@@ -113,9 +113,9 @@ def start_session(person: str, scenario: str, youtube_link: str, sample_fps: flo
     pred_per_min = float(pred.get("crashes_per_min", 0) or 0)
     duration_sec = float(pred.get("duration_sec", 0) or 0)
 
-    video_path = download_video(youtube_link, str(DOWNLOADS))
+    video_path, dl_error, dl_detail = download_video(youtube_link, str(DOWNLOADS))
     if not video_path or not os.path.exists(video_path):
-        raise RuntimeError("Failed to download video (yt-dlp/ffmpeg issue).")
+        raise RuntimeError(dl_error or "Failed to download video (yt-dlp/ffmpeg issue).")
 
     sess = {
         "sid": sid,

@@ -39,6 +39,7 @@ from validation_backend import (
     toggle_pause,
     skip_video,
     get_current_validation_link,
+    get_validation_status,
 )
 
 # ===================== TRAINING BACKEND =====================
@@ -314,6 +315,13 @@ def validation_view_stream():
 def validation_video_feed():
     from validation_backend import generate_video_stream
     return Response(generate_video_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
+@app.route("/validation_status")
+@login_required
+def validation_status():
+    """Download / stream status so the UI can show a real message instead of a blank frame."""
+    return jsonify(get_validation_status())
 
 
 @app.route("/mark_event", methods=["POST"])
@@ -918,35 +926,55 @@ def datasets_page():
         f = request.files.get("excel_file")
 
         if not f or f.filename == "":
-            error = "Please choose an Excel file."
+            error = "Pick an Excel file first"
+        elif not f.filename.lower().endswith((".xlsx", ".xls")):
+            error = f"'{f.filename}' is not an Excel file - needs .xlsx or .xls"
         else:
             file_bytes = f.read()
             if not dataset_name:
                 dataset_name = Path(f.filename).stem
 
             dataset_key = str(uuid.uuid4())
-            db.save_dataset(
-                dataset_key=dataset_key,
-                dataset_name=dataset_name,
-                original_filename=f.filename,
-                file_blob=file_bytes,
-                uploaded_by=session.get("user", ""),
-                is_active=make_active or (db.get_active_dataset() is None),
-            )
 
-            items = build_dataset_items_from_excel(file_bytes, dataset_key)
-            db.replace_dataset_items(dataset_key, items)
+            # Parse before saving, so a bad sheet never leaves an empty dataset
+            # behind (and the user gets a real reason instead of a 500 page).
+            try:
+                items = build_dataset_items_from_excel(file_bytes, dataset_key)
+            except Exception as exc:
+                items = None
+                error = f"Couldn't read '{f.filename}': {exc}"
 
-            mqtt_mgr.publish_event("dataset_uploaded", {
-                "dataset_key": dataset_key,
-                "dataset_name": dataset_name,
-                "original_filename": f.filename,
-                "uploaded_by": session.get("user", ""),
-                "is_active": make_active or (db.get_active_dataset() is None),
-                "file_b64": base64.b64encode(file_bytes).decode("utf-8"),
-            })
+            if items is not None and not items:
+                items = None
+                error = (
+                    f"No usable rows in '{f.filename}'. Each row needs a "
+                    "name and a video link."
+                )
 
-            message = f"Dataset '{dataset_name}' uploaded successfully."
+            if items is not None:
+                is_active = make_active or (db.get_active_dataset() is None)
+
+                db.save_dataset(
+                    dataset_key=dataset_key,
+                    dataset_name=dataset_name,
+                    original_filename=f.filename,
+                    file_blob=file_bytes,
+                    uploaded_by=session.get("user", ""),
+                    is_active=is_active,
+                )
+
+                db.replace_dataset_items(dataset_key, items)
+
+                mqtt_mgr.publish_event("dataset_uploaded", {
+                    "dataset_key": dataset_key,
+                    "dataset_name": dataset_name,
+                    "original_filename": f.filename,
+                    "uploaded_by": session.get("user", ""),
+                    "is_active": is_active,
+                    "file_b64": base64.b64encode(file_bytes).decode("utf-8"),
+                })
+
+                message = f"Added '{dataset_name}' - {len(items)} rows"
 
     datasets = db.list_datasets()
     active = db.get_active_dataset()
@@ -1083,20 +1111,41 @@ def validation_release_lock():
     item_key = session.get("current_item_key")
     scenario_type = session.get("current_scenario_type", "")
 
-    if item_key:
-        db.update_dataset_item(
-            item_key=item_key,
-            status="labeled",
-            labeled_by=current_user,
-            locked_by="",
-            scenario_type=scenario_type,
-        )
+    # A session that never got a video is NOT a labeled item - put it back in
+    # the queue instead of silently marking it done.
+    status_info = get_validation_status()
+    failed = status_info.get("state") == "failed"
 
-        mqtt_mgr.publish_event("item_labeled", {
-            "item_key": item_key,
-            "by": current_user,
-            "scenario_type": scenario_type,
-        })
+    if item_key:
+        if failed:
+            db.update_dataset_item(
+                item_key=item_key,
+                status="not_labeled",
+                labeled_by="",
+                locked_by="",
+                scenario_type="",
+            )
+
+            mqtt_mgr.publish_event("queue_released", {
+                "item_key": item_key,
+                "status": "not_labeled",
+                "by": current_user,
+            })
+        else:
+            db.update_dataset_item(
+                item_key=item_key,
+                status="labeled",
+                labeled_by=current_user,
+                locked_by="",
+                scenario_type=scenario_type,
+            )
+
+            mqtt_mgr.publish_event("item_labeled", {
+                "item_key": item_key,
+                "by": current_user,
+                "scenario_type": scenario_type,
+            })
+
         mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "released")
 
         session.pop("current_item_key", None)
@@ -1104,7 +1153,7 @@ def validation_release_lock():
         session.pop("current_youtube_link", None)
         session.pop("current_scenario_type", None)
 
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "released_as": "not_labeled" if failed else "labeled"})
 
 @app.route("/agent", methods=["GET", "POST"])
 @login_required
