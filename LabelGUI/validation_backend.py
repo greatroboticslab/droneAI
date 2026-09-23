@@ -76,10 +76,14 @@ def start_validation_thread(
     folder_name=None,
     delete_original=False,
     person_name=None,
-    scenario_base=None
+    scenario_base=None,
+    local_video_path=None,
 ):
     """
     Starts one clean validation session.
+
+    local_video_path: an uploaded video file to label instead of downloading
+    youtube_link. It is never deleted, even with delete_original.
 
     Saves to:
         LabelGUI/ValidationResults/<folder_name>/
@@ -131,6 +135,10 @@ def start_validation_thread(
     clips_folder = os.path.join(target_folder, "clips")
     os.makedirs(clips_folder, exist_ok=True)
 
+    if local_video_path:
+        # Uploaded files are the only copy - never delete them after labeling.
+        delete_original = False
+
     local_log_file_path = os.path.join(target_folder, "event_log.txt")
     local_validation_sid = str(uuid.uuid4())
     local_event_times = []
@@ -179,9 +187,17 @@ def start_validation_thread(
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
-    downloaded_filepath, dl_error, dl_detail = download_video(
-        youtube_link, youtube_downloads_dir
-    )
+    if local_video_path:
+        if os.path.isfile(local_video_path):
+            downloaded_filepath, dl_error, dl_detail = local_video_path, "", ""
+        else:
+            downloaded_filepath = None
+            dl_error = "The uploaded video file is missing from this computer."
+            dl_detail = local_video_path
+    else:
+        downloaded_filepath, dl_error, dl_detail = download_video(
+            youtube_link, youtube_downloads_dir
+        )
 
     if local_cancel_event.is_set():
         with _state_lock:

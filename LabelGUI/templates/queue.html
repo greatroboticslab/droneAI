@@ -45,6 +45,8 @@
             <th>Row</th>
             <th>Person</th>
             <th>Video</th>
+            <th>View</th>
+            <th>Source</th>
             <th>Status</th>
             <th>Labeled By</th>
             <th>Locked By</th>
@@ -56,7 +58,11 @@
           <tr>
             <td>{{ item.row_index }}</td>
             <td><b>{{ item.person_name }}</b></td>
-            <td class="truncate" title="{{ item.youtube_link }}">{{ item.youtube_link }}</td>
+            <td class="truncate" title="{{ item.youtube_link }}">
+              {% if item.local_path %}<span class="chip">File</span> {% endif %}{{ item.youtube_link }}
+            </td>
+            <td>{{ item.view_type or '-' }}</td>
+            <td>{{ item.source or '-' }}</td>
             <td>
               {% if item.status == 'labeled' %}
                 <span class="chip chip--ok">Labeled</span>
@@ -73,8 +79,8 @@
                 <form method="POST" action="/queue/start/{{ item.item_key }}">
                   <label>Scenario</label>
                   <select name="scenario_type">
-                    <option value="Simulation">Simulation</option>
-                    <option value="Real flight">Real flight</option>
+                    <option value="Simulation" {% if item.source == 'Simulation' %}selected{% endif %}>Simulation</option>
+                    <option value="Real flight" {% if item.source == 'Real' %}selected{% endif %}>Real flight</option>
                   </select>
             
                   <label>Output Folder</label>
@@ -84,10 +90,12 @@
                     value="{{ item.person_name|replace(' ', '_')|replace('|', '_') }}"
                   >
             
+                  {% if not item.local_path %}
                   <label style="display:flex; gap:8px; align-items:center; margin-top:8px;">
                     <input type="checkbox" name="delete_original" style="width:auto;">
                     Delete original
                   </label>
+                  {% endif %}
             
                   <button class="btn btn--primary" type="submit" style="margin-top:8px;">
                     {% if item.status == 'labeled' %}

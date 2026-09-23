@@ -5,6 +5,16 @@ from typing import List, Dict, Any, Optional
 
 
 class DBStore:
+    # Per-video metadata for training splits, and a path for uploaded files.
+    ITEM_EXTRA_COLUMNS = ("video_id", "view_type", "source", "local_path")
+
+    _ITEM_SELECT = """
+        SELECT item_key, dataset_key, row_index, person_name, youtube_link,
+               status, labeled_by, locked_by, scenario_type, updated_at,
+               video_id, view_type, source, local_path
+        FROM dataset_items
+    """
+
     def __init__(self, db_path: str):
         self.db_path = str(Path(db_path))
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -135,6 +145,12 @@ class DBStore:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dataset_items_dataset_key ON dataset_items(dataset_key);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_dataset_items_status ON dataset_items(status);")
+
+            # Columns added after the first release; ALTER existing DBs in place.
+            existing = {r["name"] for r in conn.execute("PRAGMA table_info(dataset_items)")}
+            for col in self.ITEM_EXTRA_COLUMNS:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE dataset_items ADD COLUMN {col} TEXT DEFAULT ''")
 
             conn.commit()
 
@@ -335,49 +351,62 @@ class DBStore:
             return row["file_blob"] if row else None
 
     def replace_dataset_items(self, dataset_key: str, items: List[Dict[str, Any]]):
-        now = datetime.utcnow().isoformat()
         with self._conn() as conn:
             conn.execute("DELETE FROM dataset_items WHERE dataset_key=?", (dataset_key,))
-            for item in items:
-                conn.execute("""
-                    INSERT INTO dataset_items (
-                        item_key, dataset_key, row_index, person_name, youtube_link,
-                        status, labeled_by, locked_by, scenario_type, updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    item["item_key"],
-                    dataset_key,
-                    int(item["row_index"]),
-                    item.get("person_name", ""),
-                    item.get("youtube_link", ""),
-                    item.get("status", "not_labeled"),
-                    item.get("labeled_by", ""),
-                    item.get("locked_by", ""),
-                    item.get("scenario_type", ""),
-                    now,
-                ))
+            self._insert_items(conn, dataset_key, items)
             conn.commit()
+
+    def add_dataset_items(self, dataset_key: str, items: List[Dict[str, Any]]):
+        with self._conn() as conn:
+            self._insert_items(conn, dataset_key, items)
+            conn.commit()
+
+    def next_row_index(self, dataset_key: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "SELECT COALESCE(MAX(row_index), 0) AS m FROM dataset_items WHERE dataset_key=?",
+                (dataset_key,),
+            )
+            return int(cur.fetchone()["m"]) + 1
+
+    def _insert_items(self, conn, dataset_key: str, items: List[Dict[str, Any]]):
+        now = datetime.utcnow().isoformat()
+        for item in items:
+            conn.execute("""
+                INSERT INTO dataset_items (
+                    item_key, dataset_key, row_index, person_name, youtube_link,
+                    status, labeled_by, locked_by, scenario_type, updated_at,
+                    video_id, view_type, source, local_path
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                item["item_key"],
+                dataset_key,
+                int(item["row_index"]),
+                item.get("person_name", ""),
+                item.get("youtube_link", ""),
+                item.get("status", "not_labeled"),
+                item.get("labeled_by", ""),
+                item.get("locked_by", ""),
+                item.get("scenario_type", ""),
+                now,
+                item.get("video_id", ""),
+                item.get("view_type", ""),
+                item.get("source", ""),
+                item.get("local_path", ""),
+            ))
 
     def list_dataset_items(self, dataset_key: str) -> List[Dict[str, Any]]:
         with self._conn() as conn:
-            cur = conn.execute("""
-                SELECT item_key, dataset_key, row_index, person_name, youtube_link,
-                       status, labeled_by, locked_by, scenario_type, updated_at
-                FROM dataset_items
-                WHERE dataset_key=?
-                ORDER BY row_index ASC
-            """, (dataset_key,))
+            cur = conn.execute(
+                self._ITEM_SELECT + " WHERE dataset_key=? ORDER BY row_index ASC",
+                (dataset_key,),
+            )
             return [dict(r) for r in cur.fetchall()]
 
     def get_dataset_item(self, item_key: str) -> Optional[Dict[str, Any]]:
         with self._conn() as conn:
-            cur = conn.execute("""
-                SELECT item_key, dataset_key, row_index, person_name, youtube_link,
-                       status, labeled_by, locked_by, scenario_type, updated_at
-                FROM dataset_items
-                WHERE item_key=?
-            """, (item_key,))
+            cur = conn.execute(self._ITEM_SELECT + " WHERE item_key=?", (item_key,))
             row = cur.fetchone()
             return dict(row) if row else None
 

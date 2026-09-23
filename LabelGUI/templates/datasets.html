@@ -22,10 +22,14 @@
   </div>
 </header>
 
-<main class="container">
+<main class="container" id="datasets-main"
+      data-upload-message="{{ message or '' }}"
+      data-upload-error="{{ error or '' }}">
   <div class="grid grid--2">
+    <div>
     <section class="card">
       <h2>Upload New Dataset</h2>
+      <p class="muted">Excel with a name column and a YouTube link column. Optional columns: Video ID, View Type (FPV / Third-person), Source (Real / Simulation).</p>
 
       <form id="upload-form" method="POST" action="/datasets" enctype="multipart/form-data">
         <label>Dataset Name</label>
@@ -44,6 +48,53 @@
         </div>
       </form>
     </section>
+
+    <section class="card" style="margin-top:18px;">
+      <h2>Upload Video Files</h2>
+      <p class="muted">For videos that are not on YouTube. Each file becomes a row in the queue.</p>
+
+      <form id="video-upload-form" method="POST" action="/datasets/upload_videos" enctype="multipart/form-data">
+        <label>Add to</label>
+        <select name="target_dataset" id="target-dataset">
+          <option value="">New dataset</option>
+          {% for d in datasets %}
+          <option value="{{ d.dataset_key }}">{{ d.dataset_name }}</option>
+          {% endfor %}
+        </select>
+
+        <div id="new-dataset-name-wrap">
+          <label>New Dataset Name</label>
+          <input name="new_dataset_name" placeholder="Dataset name">
+        </div>
+
+        <label>Video Files</label>
+        <input type="file" name="video_files" accept=".mp4,.mov,.avi,.mkv,.m4v,.webm,video/*" multiple required>
+
+        <label>View Type</label>
+        <select name="view_type">
+          {% for v in view_types %}
+          <option value="{{ v }}">{{ v }}</option>
+          {% endfor %}
+        </select>
+
+        <label>Source</label>
+        <select name="source">
+          {% for s in sources %}
+          <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+
+        <label style="display:flex; gap:10px; align-items:center; margin-top:12px;">
+          <input type="checkbox" name="make_active" style="width:auto;">
+          Set as active dataset
+        </label>
+
+        <div class="actions actions--big">
+          <button id="video-upload-btn" class="btn btn--primary" type="submit">Upload Videos</button>
+        </div>
+      </form>
+    </section>
+    </div>
 
     <section class="card">
       <h2>Existing Datasets</h2>
@@ -91,9 +142,11 @@
 </main>
 
 <script>
-  // Server-rendered outcome of the previous upload, surfaced as a popup.
-  const uploadMessage = {{ (message or '')|tojson }};
-  const uploadError = {{ (error or '')|tojson }};
+  // Server-rendered outcome of the previous upload (data-* attributes on
+  // <main>, so this script stays plain JS), surfaced as a popup.
+  const pageData = document.getElementById('datasets-main').dataset;
+  const uploadMessage = pageData.uploadMessage;
+  const uploadError = pageData.uploadError;
 
   if (uploadMessage) {
     showToast({
@@ -146,6 +199,45 @@
     showToast({
       type: 'info',
       message: 'Uploading ' + file.name + '…',
+      duration: 0
+    });
+  });
+
+  // Video upload: only ask for a name when creating a new dataset.
+  const videoForm = document.getElementById('video-upload-form');
+  const videoBtn = document.getElementById('video-upload-btn');
+  const targetSelect = document.getElementById('target-dataset');
+  const newNameWrap = document.getElementById('new-dataset-name-wrap');
+
+  targetSelect.addEventListener('change', () => {
+    newNameWrap.style.display = targetSelect.value ? 'none' : '';
+  });
+
+  videoForm.addEventListener('submit', (e) => {
+    const files = videoForm.querySelector('input[type="file"]').files;
+
+    if (!files || !files.length) {
+      e.preventDefault();
+      showToast({ type: 'warning', message: 'Pick one or more video files first' });
+      return;
+    }
+
+    const bad = Array.from(files).filter(f => !/\.(mp4|mov|avi|mkv|m4v|webm)$/i.test(f.name));
+    if (bad.length) {
+      e.preventDefault();
+      showToast({ type: 'error', message: 'Not a video file: ' + bad.map(f => f.name).join(', ') });
+      return;
+    }
+
+    // Defer: disabling inside the submit handler can cancel the submission.
+    setTimeout(() => {
+      videoBtn.disabled = true;
+      videoBtn.textContent = 'Uploading…';
+    }, 0);
+
+    showToast({
+      type: 'info',
+      message: 'Uploading ' + files.length + ' video(s)… large files can take a while',
       duration: 0
     });
   });

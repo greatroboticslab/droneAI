@@ -28,6 +28,14 @@ from mqtt_client import MQTTManager
 from flask import send_file, session
 from pathlib import Path
 from db.db_store import DBStore
+from dataset_import import (
+    build_dataset_items_from_excel,
+    build_video_file_item,
+    is_video_filename,
+    save_uploaded_video,
+    VIEW_TYPES,
+    SOURCES,
+)
 
 # ===================== VALIDATION BACKEND =====================
 from validation_backend import (
@@ -126,57 +134,6 @@ def is_video_locked(lock_key, current_user):
 
     return False, by_user
 
-def _normalize_dataset_columns(df):
-    cols = {str(c).strip().lower(): c for c in df.columns}
-
-    person_col = None
-    link_col = None
-
-    person_candidates = ["persona name", "person name", "person", "name"]
-    link_candidates = ["youtube link", "youtube url", "youtube", "link", "url"]
-
-    for c in person_candidates:
-        if c in cols:
-            person_col = cols[c]
-            break
-
-    for c in link_candidates:
-        if c in cols:
-            link_col = cols[c]
-            break
-
-    if not person_col or not link_col:
-        raise ValueError("Excel must contain a person/name column and a YouTube link column.")
-
-    return person_col, link_col
-
-def build_dataset_items_from_excel(file_bytes: bytes, dataset_key: str):
-    import pandas as pd
-    from io import BytesIO
-
-    df = pd.read_excel(BytesIO(file_bytes), sheet_name=0)
-    person_col, link_col = _normalize_dataset_columns(df)
-
-    items = []
-    row_num = 0
-    for _, row in df.iterrows():
-        person = str(row.get(person_col) or "").strip()
-        link = str(row.get(link_col) or "").strip()
-        if not link:
-            continue
-        row_num += 1
-        items.append({
-            "item_key": f"{dataset_key}:{row_num}",
-            "row_index": row_num,
-            "person_name": person,
-            "youtube_link": link,
-            "status": "not_labeled",
-            "labeled_by": "",
-            "locked_by": "",
-            "scenario_type": "",
-        })
-    return items
-
 def active_dataset_with_stats():
     active = db.get_active_dataset()
     if not active:
@@ -218,8 +175,8 @@ def handle_mqtt_event(data: dict):
                 item_key=item_key,
                 status="in_progress",
                 labeled_by="",
-                locked_by=current_user,
-                scenario_type=scenario_type,
+                locked_by=data.get("by", ""),
+                scenario_type=data.get("scenario_type", ""),
             )
 
     elif event_type == "item_labeled":
@@ -813,6 +770,7 @@ def db_export_excel():
         "validation_events",
         "training_sessions",
         "training_chunks",
+        "dataset_items",
     ]
 
     output = io.BytesIO()
@@ -978,7 +936,98 @@ def datasets_page():
 
     datasets = db.list_datasets()
     active = db.get_active_dataset()
-    return render_template("datasets.html", datasets=datasets, active_dataset=active, message=message, error=error)
+    return render_template(
+        "datasets.html",
+        datasets=datasets,
+        active_dataset=active,
+        message=message,
+        error=error,
+        view_types=VIEW_TYPES,
+        sources=SOURCES,
+    )
+
+
+UPLOADED_VIDEOS_DIR = BASE_DIR / "Uploads" / "videos"
+
+
+@app.route("/datasets/upload_videos", methods=["POST"])
+@leader_required
+def datasets_upload_videos():
+    """
+    Add uploaded video files to a dataset, as queue items that label from the
+    local file. Target is an existing dataset, or a new one named in the form.
+    """
+    target_key = request.form.get("target_dataset", "").strip()
+    new_name = request.form.get("new_dataset_name", "").strip()
+    view_type = request.form.get("view_type", "Unknown")
+    source = request.form.get("source", "Unknown")
+    make_active = request.form.get("make_active") == "on"
+
+    files = [f for f in request.files.getlist("video_files") if f and f.filename]
+    message = None
+    error = None
+
+    bad = [f.filename for f in files if not is_video_filename(f.filename)]
+    if not files:
+        error = "Pick one or more video files first"
+    elif bad:
+        error = "Not a video file: " + ", ".join(bad)
+    elif target_key and not db.dataset_exists(target_key):
+        error = "That dataset no longer exists"
+
+    if error is None:
+        if not target_key:
+            target_key = str(uuid.uuid4())
+            db.save_dataset(
+                dataset_key=target_key,
+                dataset_name=new_name or f"Video upload {datetime.now():%Y-%m-%d %H:%M}",
+                original_filename="(uploaded videos)",
+                file_blob=b"",
+                uploaded_by=session.get("user", ""),
+                is_active=make_active or (db.get_active_dataset() is None),
+            )
+        elif make_active:
+            db.set_active_dataset(target_key)
+
+        existing_ids = {it["video_id"] for it in db.list_dataset_items(target_key)}
+        row_index = db.next_row_index(target_key)
+        items = []
+        skipped = []
+        for f in files:
+            video_id, saved_path = save_uploaded_video(f, UPLOADED_VIDEOS_DIR)
+            if video_id in existing_ids:
+                skipped.append(f.filename)
+                continue
+            existing_ids.add(video_id)
+            items.append(build_video_file_item(
+                dataset_key=target_key,
+                row_index=row_index,
+                video_id=video_id,
+                saved_path=saved_path,
+                original_filename=f.filename,
+                person_name="",
+                view_type=view_type,
+                source=source,
+                repo_dir=REPO_DIR,
+            ))
+            row_index += 1
+
+        db.add_dataset_items(target_key, items)
+        message = f"Added {len(items)} video(s)"
+        if skipped:
+            message += f"; skipped {len(skipped)} already in this dataset"
+
+    datasets = db.list_datasets()
+    active = db.get_active_dataset()
+    return render_template(
+        "datasets.html",
+        datasets=datasets,
+        active_dataset=active,
+        message=message,
+        error=error,
+        view_types=VIEW_TYPES,
+        sources=SOURCES,
+    )
 
 @app.route("/datasets/set_active/<dataset_key>", methods=["POST"])
 @leader_required
@@ -1054,13 +1103,18 @@ def queue_start_item(item_key):
     session["current_youtube_link"] = item["youtube_link"]
     session["current_scenario_type"] = scenario_type
 
+    local_video_path = None
+    if item.get("local_path"):
+        local_video_path = str(REPO_DIR / item["local_path"])
+
     start_validation_thread(
-    youtube_link=item["youtube_link"],
-    folder_name=output_folder_name,
-    delete_original=delete_original,
-    person_name=item["person_name"],
-    scenario_base=scenario_type,
-)
+        youtube_link=item["youtube_link"],
+        folder_name=output_folder_name,
+        delete_original=delete_original,
+        person_name=item["person_name"],
+        scenario_base=scenario_type,
+        local_video_path=local_video_path,
+    )
 
     mqtt_mgr.publish_event("validation_started", {
         "by": current_user,
