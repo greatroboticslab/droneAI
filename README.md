@@ -66,9 +66,15 @@ Pick your operating system below. Every command runs from the repository folder.
    pip install -r LabelGUI/requirements-ml.txt    # GUI + ML
    ```
 
-Macs have no NVIDIA GPU. PyTorch can use the Apple GPU (MPS), but the ML scripts only accept
-`--device cpu` or `--device cuda` for now. Use a Mac for the GUI and for small test runs, and
-run heavy ML jobs on the GPU PC.
+Macs have no NVIDIA GPU, but PyTorch can use the Apple GPU (MPS) on Apple Silicon Macs. The
+DPFlow feature extraction script accepts `--device mps` for small local runs, for example:
+
+```bash
+python LabelGUI/extract_dpflow_drone_features.py --device mps --max-clips 2
+```
+
+On a small test it gave the same numbers as `--device cpu` and ran about 6 times faster. The
+other ML scripts still accept only `cpu` or `cuda`. Run full-size jobs on the GPU PC.
 
 ### Linux (Ubuntu / Debian)
 

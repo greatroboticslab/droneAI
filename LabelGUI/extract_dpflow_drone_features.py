@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import re
 import time
 from datetime import datetime
@@ -9,6 +10,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
+
+# With --device mps (Apple GPU), let the few operations MPS doesn't support yet
+# run on the CPU instead of failing. Must be set before torch is imported.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 import torch
 
 import ptlflow
@@ -697,7 +703,12 @@ def main():
 
     parser.add_argument("--model", default="dpflow")
     parser.add_argument("--ckpt", default="things")
-    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        choices=["cpu", "cuda", "mps"],
+        help="cpu, cuda (NVIDIA GPU), or mps (Apple GPU, for small local runs on a Mac).",
+    )
 
     parser.add_argument("--run-name", default="")
     parser.add_argument("--fps", type=float, default=10.0)
@@ -711,6 +722,11 @@ def main():
 
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested, but torch.cuda.is_available() is False.")
+
+    if args.device == "mps" and not torch.backends.mps.is_available():
+        if not torch.backends.mps.is_built():
+            raise RuntimeError("MPS requested, but this PyTorch build has no MPS support.")
+        raise RuntimeError("MPS requested, but no Apple GPU is available (needs Apple Silicon and macOS 12.3+).")
 
     device = torch.device(args.device)
 
