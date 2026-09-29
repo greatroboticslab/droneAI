@@ -27,3 +27,5 @@ db
 # Personal Claude/planning docs (not for the team)
 CLAUDE.md
 ROADMAP.md
+
+Data_Excel/*
