@@ -1,9 +1,4 @@
-flask
-pandas
-openpyxl
-opencv-python
-yt-dlp
-ultralytics
-numpy
-certifi
-imageio-ffmpeg
+# Kept so old instructions still work. Use one of:
+#   requirements-app.txt  labeling GUI only
+#   requirements-ml.txt   GUI + ML scripts
+-r requirements-app.txt

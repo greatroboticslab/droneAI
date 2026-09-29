@@ -55,17 +55,22 @@ On Mac/Linux:
 source venv/bin/activate
 ```
 
-Install dependencies:
+Install dependencies (Python 3.11 or 3.12).
+
+For the labeling GUI only:
 
 ```bash
-pip install flask pandas openpyxl opencv-python numpy yt-dlp paho-mqtt
+pip install -r LabelGUI/requirements-app.txt
 ```
 
-If the project includes a `requirements.txt` file, you can also run:
+For the GUI plus the ML scripts (optical flow, training, YOLO):
 
 ```bash
-pip install -r requirements.txt
+pip install -r LabelGUI/requirements-ml.txt
 ```
+
+On a Windows GPU machine, install the CUDA build of PyTorch first. The steps are at the top of
+`LabelGUI/requirements-ml.txt`.
 
 ---
 

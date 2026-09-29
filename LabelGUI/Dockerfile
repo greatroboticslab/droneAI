@@ -12,7 +12,7 @@ RUN apt-get update && \
 WORKDIR /app
 COPY . /app
 
-RUN pip install --no-cache-dir opencv-python yt-dlp flask
+RUN pip install --no-cache-dir -r requirements-app.txt
 
 EXPOSE 5000
 

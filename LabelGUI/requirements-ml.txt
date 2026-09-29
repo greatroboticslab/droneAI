@@ -1,0 +1,31 @@
+# ML scripts: DPFlow feature extraction, tabular models, LSTM, ViT, YOLO, VideoMAE.
+# Includes everything in requirements-app.txt.
+# Tested with Python 3.11 and 3.12 (2026-09-29).
+#
+# macOS / Linux:
+#   pip install -r LabelGUI/requirements-ml.txt
+# On macOS, xgboost also needs OpenMP: brew install libomp
+# (without it, train_dpflow_tabular_models.py silently skips the xgboost model).
+#
+# Windows GPU PC (PyPI only has CPU builds of torch for Windows). Install the
+# CUDA build of torch first, then the rest. Pick the cuXXX that your NVIDIA
+# driver supports (cu126, cu128 and cu130 all have torch 2.11.0):
+#   pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu128
+#   pip install -r LabelGUI/requirements-ml.txt
+# Check: python -c "import torch; print(torch.cuda.is_available())"
+
+-r requirements-app.txt
+
+torch==2.11.0
+torchvision==0.26.0
+ptlflow==0.4.2             # DPFlow and other optical-flow models
+scikit-learn==1.9.1
+xgboost==3.2.0             # 3.4 needs Python 3.12+
+ultralytics==8.4.123       # YOLOv8; newer 8.4.x need numpy >= 2.3 on macOS
+transformers==5.17.0       # VideoMAE (Phase 2 fallback)
+pillow==12.3.0
+matplotlib==3.11.2
+inference-sdk==1.7.2       # Roboflow hosted YOLO (extract_drone_motion_features.py)
+
+# Not included: the dataset-check scripts validate_tartanair_farneback.py and
+# test_tartanair_v2_access.py also need `tartanair` and `azure-storage-blob`.
