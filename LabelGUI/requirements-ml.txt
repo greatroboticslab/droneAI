@@ -7,6 +7,11 @@
 # On macOS, xgboost also needs OpenMP: brew install libomp
 # (without it, train_dpflow_tabular_models.py silently skips the xgboost model).
 #
+# Full per-OS and GPU steps: see "Setup" and "GPU setup" in the README.
+#
+# Linux: the default torch from PyPI is a CUDA 13.0 build. With an older NVIDIA
+# driver, install torch from the cu128 or cu126 index first (same as below).
+#
 # Windows GPU PC (PyPI only has CPU builds of torch for Windows). Install the
 # CUDA build of torch first, then the rest. Pick the cuXXX that your NVIDIA
 # driver supports (cu126, cu128 and cu130 all have torch 2.11.0):
