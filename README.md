@@ -283,6 +283,16 @@ db/droneai.sqlite
 
 If you want another machine to continue from the same state, export the database from **DB Tools** and import it on the other machine.
 
+To give the ML scripts a list of videos, export a video manifest (one row per video, with its
+view type, source, link or file path, labeling status and event counts):
+
+```bash
+python LabelGUI/video_manifest.py                  # writes analysis/data/video_manifest.csv
+python LabelGUI/video_manifest.py --active-only    # only the active dataset
+```
+
+The database is opened read-only. Only finished labeling sessions are counted.
+
 ---
 
 ## Author
