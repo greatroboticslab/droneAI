@@ -3,6 +3,8 @@ import csv
 import shutil
 from pathlib import Path
 
+from repo_paths import repo_rel, resolve_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -140,13 +142,13 @@ def main():
 
     args = parser.parse_args()
 
-    overlay_folder = Path(args.overlay_folder)
+    overlay_folder = resolve_path(args.overlay_folder)
 
     if not overlay_folder.exists():
         raise FileNotFoundError(f"Overlay folder not found: {overlay_folder}")
 
     if args.raw_root:
-        raw_roots = [Path(p) for p in args.raw_root]
+        raw_roots = [resolve_path(p) for p in args.raw_root]
     else:
         raw_roots = DEFAULT_RAW_ROOTS
 
@@ -196,7 +198,7 @@ def main():
 
         if raw_path is None:
             missing_rows.append({
-                "overlay_image": str(overlay_path),
+                "overlay_image": repo_rel(overlay_path),
                 "overlay_filename": overlay_name,
                 "reason": "No matching raw image found",
             })
@@ -205,10 +207,10 @@ def main():
 
         if len(matches) > 1:
             duplicate_rows.append({
-                "overlay_image": str(overlay_path),
+                "overlay_image": repo_rel(overlay_path),
                 "overlay_filename": overlay_name,
-                "chosen_raw": str(raw_path),
-                "all_matches": " | ".join(str(m) for m in matches),
+                "chosen_raw": repo_rel(raw_path),
+                "all_matches": " | ".join(repo_rel(m) for m in matches),
             })
 
         dst = output_images_dir / raw_path.name
@@ -220,9 +222,9 @@ def main():
         shutil.copy2(raw_path, dst)
 
         copied_rows.append({
-            "overlay_image": str(overlay_path),
-            "raw_image": str(raw_path),
-            "copied_to": str(dst),
+            "overlay_image": repo_rel(overlay_path),
+            "raw_image": repo_rel(raw_path),
+            "copied_to": repo_rel(dst),
         })
 
         copied_count += 1

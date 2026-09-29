@@ -15,6 +15,8 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
+from repo_paths import repo_rel, resolve_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -425,7 +427,7 @@ def main():
 
     set_seed(42)
 
-    sequence_csv = Path(args.sequence_csv)
+    sequence_csv = resolve_path(args.sequence_csv)
 
     clips_df, feature_cols = load_sequence_data(sequence_csv)
 
@@ -610,7 +612,7 @@ def main():
 
     metrics = {
         "created_at": datetime.now().isoformat(),
-        "sequence_csv": str(sequence_csv),
+        "sequence_csv": repo_rel(sequence_csv),
         "model": "bidirectional_lstm",
         "note": "This is a standard PyTorch LSTM sequence baseline, not true xLSTM yet.",
         "split_mode": args.split_mode,

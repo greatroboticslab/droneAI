@@ -6,6 +6,8 @@ from pathlib import Path
 import cv2
 from inference_sdk import InferenceHTTPClient
 
+from repo_paths import repo_rel, resolve_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -79,7 +81,7 @@ def main():
     if not api_key:
         raise ValueError("Missing API key. Pass --api-key or set ROBOFLOW_API_KEY.")
 
-    source_dir = Path(args.source)
+    source_dir = resolve_path(args.source)
 
     if not source_dir.exists():
         raise FileNotFoundError(f"Source folder not found: {source_dir}")
@@ -114,8 +116,8 @@ def main():
         if predictions:
             for pred in predictions:
                 rows.append({
-                    "image": str(image_path),
-                    "overlay": str(output_path),
+                    "image": repo_rel(image_path),
+                    "overlay": repo_rel(output_path),
                     "class": pred.get("class", ""),
                     "confidence": pred.get("confidence", ""),
                     "x": pred.get("x", ""),
@@ -125,8 +127,8 @@ def main():
                 })
         else:
             rows.append({
-                "image": str(image_path),
-                "overlay": str(output_path),
+                "image": repo_rel(image_path),
+                "overlay": repo_rel(output_path),
                 "class": "",
                 "confidence": "",
                 "x": "",

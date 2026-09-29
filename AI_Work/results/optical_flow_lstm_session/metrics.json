@@ -1,6 +1,6 @@
 {
   "created_at": "2026-07-09T20:56:15.436878",
-  "sequence_csv": "C:\\Users\\rusha\\droneAI\\LabelGUI\\OpticalFlowResults\\flow_v1\\flow_sequence_features.csv",
+  "sequence_csv": "LabelGUI/OpticalFlowResults/flow_v1/flow_sequence_features.csv",
   "model": "bidirectional_lstm",
   "note": "This is a standard PyTorch LSTM sequence baseline, not true xLSTM yet.",
   "split_mode": "session",

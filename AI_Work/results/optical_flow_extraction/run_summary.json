@@ -5,7 +5,7 @@
   "total_flow_steps": 1149,
   "mean_roi_available_rate": 0.8955613577023499,
   "mean_both_detected_rate": 0.783289817232376,
-  "sequence_features_csv": "C:\\Users\\rusha\\droneAI\\LabelGUI\\OpticalFlowResults\\flow_v1\\flow_sequence_features.csv",
-  "clip_summary_csv": "C:\\Users\\rusha\\droneAI\\LabelGUI\\OpticalFlowResults\\flow_v1\\clip_flow_summary.csv",
-  "debug_images": "C:\\Users\\rusha\\droneAI\\LabelGUI\\OpticalFlowResults\\flow_v1\\debug_flow_images"
+  "sequence_features_csv": "LabelGUI/OpticalFlowResults/flow_v1/flow_sequence_features.csv",
+  "clip_summary_csv": "LabelGUI/OpticalFlowResults/flow_v1/clip_flow_summary.csv",
+  "debug_images": "LabelGUI/OpticalFlowResults/flow_v1/debug_flow_images"
 }

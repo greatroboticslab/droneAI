@@ -16,6 +16,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.svm import SVC
 
+from repo_paths import repo_rel, resolve_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
@@ -35,13 +37,6 @@ def json_safe(obj):
     if isinstance(obj, Path):
         return str(obj)
     raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
-
-
-def resolve_path(path_like):
-    p = Path(path_like)
-    if p.is_absolute():
-        return p
-    return PROJECT_DIR / p
 
 
 def safe_series(g, col):
@@ -514,7 +509,7 @@ def main():
     metrics = {
         "run_name": run_name,
         "stage": "tabular_training",
-        "input_features_csv": str(features_csv),
+        "input_features_csv": repo_rel(features_csv),
         "split_mode": args.split_mode,
         "seed": args.seed,
         "total_clips": int(len(clip_df)),
@@ -529,7 +524,7 @@ def main():
         "weighted_f1": best_eval["weighted_f1"],
         "all_model_results": results,
         "notes": "DPFlow sequence features summarized into one tabular feature vector per clip. Tree/linear/SVM baselines trained for small-data comparison against LSTM and VideoMAE.",
-        "output_dir": str(output_dir),
+        "output_dir": repo_rel(output_dir),
     }
 
     with open(output_dir / "metrics.json", "w", encoding="utf-8") as f:
@@ -570,7 +565,7 @@ def main():
         "weighted_f1": best_eval["weighted_f1"],
         "best_epoch": "n/a",
         "notes": "DPFlow tabular summary feature baseline.",
-        "result_folder": str(output_dir),
+        "result_folder": repo_rel(output_dir),
     })
 
     print("\n=== Done ===")

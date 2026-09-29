@@ -14,6 +14,9 @@ import torch
 import ptlflow
 from ptlflow.utils.io_adapter import IOAdapter
 
+from repo_paths import repo_rel
+from repo_paths import resolve_path as _resolve_repo_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BASE_DIR.parent
@@ -40,29 +43,9 @@ def find_col(df, candidates, required=False, label="column"):
 
 
 def resolve_path(value, base_candidates):
-    if pd.isna(value):
-        return None
-
-    p = Path(str(value).strip().replace("\\", "/"))
-
-    candidates = []
-
-    if p.is_absolute():
-        candidates.append(p)
-    else:
-        candidates.extend([
-            Path.cwd() / p,
-            PROJECT_DIR / p,
-            BASE_DIR / p,
-            *[b / p for b in base_candidates],
-        ])
-
-    for c in candidates:
-        if c.exists():
-            return c.resolve()
-
-    # Return best guess even if missing, so logs are understandable.
-    return candidates[0].resolve()
+    # Tries cwd, repo root, LabelGUI/, then base_candidates. Also remaps absolute
+    # paths written on another machine (e.g. C:\Users\...\droneAI\LabelGUI\...).
+    return _resolve_repo_path(value, *base_candidates)
 
 
 def parse_frame_number(path_or_name):
@@ -83,7 +66,7 @@ def safe_float(x, default=np.nan):
 
 
 def load_manifest(manifest_path):
-    manifest_path = Path(manifest_path)
+    manifest_path = _resolve_repo_path(manifest_path)
     if not manifest_path.is_absolute():
         manifest_path = PROJECT_DIR / manifest_path
 
@@ -222,7 +205,7 @@ def load_detections(detections_path):
     if not detections_path:
         return {}
 
-    detections_path = Path(detections_path)
+    detections_path = _resolve_repo_path(detections_path)
     if not detections_path.is_absolute():
         detections_path = PROJECT_DIR / detections_path
 
@@ -844,8 +827,8 @@ def main():
                     "step_index": int(step_idx),
                     "frame_a_index": int(row_a["frame_index"]),
                     "frame_b_index": int(row_b["frame_index"]),
-                    "frame_a_path": str(path_a),
-                    "frame_b_path": str(path_b),
+                    "frame_a_path": repo_rel(path_a),
+                    "frame_b_path": repo_rel(path_b),
                     "dt": float(dt),
                     "roi_available": roi_available,
                     "both_detected": both_detected,
@@ -884,8 +867,8 @@ def main():
                     "step_index": int(step_idx),
                     "frame_a_index": int(row_a["frame_index"]),
                     "frame_b_index": int(row_b["frame_index"]),
-                    "frame_a_path": str(path_a),
-                    "frame_b_path": str(path_b),
+                    "frame_a_path": repo_rel(path_a),
+                    "frame_b_path": repo_rel(path_b),
                     "dt": 1.0 / max(args.fps, 1e-6),
                     "roi_available": 0,
                     "both_detected": 0,
@@ -921,8 +904,8 @@ def main():
         "model": args.model,
         "checkpoint": args.ckpt,
         "device": str(device),
-        "manifest": str(manifest_path),
-        "detections": str(args.detections),
+        "manifest": repo_rel(manifest_path),
+        "detections": repo_rel(_resolve_repo_path(args.detections)),
         "resize_width": args.resize_width,
         "fps_fallback": args.fps,
         "total_clips": int(clip_summary_df["clip_group"].nunique()) if len(clip_summary_df) else 0,
@@ -931,10 +914,10 @@ def main():
         "mean_roi_available_rate": float(clip_summary_df["roi_available_rate"].mean()) if len(clip_summary_df) else None,
         "mean_both_detected_rate": float(clip_summary_df["both_detected_rate"].mean()) if len(clip_summary_df) else None,
         "elapsed_seconds": float(elapsed),
-        "output_dir": str(output_dir),
-        "sequence_features_csv": str(sequence_csv),
-        "clip_summary_csv": str(clip_summary_csv),
-        "debug_images": str(debug_dir),
+        "output_dir": repo_rel(output_dir),
+        "sequence_features_csv": repo_rel(sequence_csv),
+        "clip_summary_csv": repo_rel(clip_summary_csv),
+        "debug_images": repo_rel(debug_dir),
     }
 
     with open(output_dir / "run_summary.json", "w", encoding="utf-8") as f:

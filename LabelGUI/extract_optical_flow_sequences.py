@@ -7,6 +7,8 @@ import cv2
 import numpy as np
 import pandas as pd
 
+from repo_paths import repo_rel, resolve_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -546,7 +548,7 @@ def main():
     output_dir = OPTICAL_FLOW_RESULTS_DIR / args.run_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    detections_csv = Path(args.detections_csv)
+    detections_csv = resolve_path(args.detections_csv)
 
     print("\n==============================")
     print("DroneAI Optical Flow Extractor")
@@ -579,9 +581,9 @@ def main():
         "total_flow_steps": int(len(flow_df)),
         "mean_roi_available_rate": float(flow_df["roi_available"].mean()) if not flow_df.empty else 0.0,
         "mean_both_detected_rate": float(flow_df["both_detected"].mean()) if not flow_df.empty else 0.0,
-        "sequence_features_csv": str(sequence_path),
-        "clip_summary_csv": str(clip_summary_path),
-        "debug_images": str(output_dir / "debug_flow_images"),
+        "sequence_features_csv": repo_rel(sequence_path),
+        "clip_summary_csv": repo_rel(clip_summary_path),
+        "debug_images": repo_rel(output_dir / "debug_flow_images"),
     }
 
     with open(output_dir / "run_summary.json", "w", encoding="utf-8") as f:

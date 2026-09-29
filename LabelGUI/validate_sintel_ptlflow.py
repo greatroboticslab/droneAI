@@ -10,6 +10,8 @@ import torch
 import ptlflow
 from ptlflow.utils.io_adapter import IOAdapter
 
+from repo_paths import repo_rel, resolve_path
+
 
 FLO_TAG = 202021.25
 
@@ -367,10 +369,7 @@ def main():
     device = torch.device(args.device)
 
     base_dir = Path(__file__).resolve().parent
-    sintel_root = Path(args.sintel_root)
-
-    if not sintel_root.is_absolute():
-        sintel_root = Path.cwd() / sintel_root
+    sintel_root = resolve_path(args.sintel_root)
 
     run_name = args.run_name
     if not run_name:
@@ -421,10 +420,10 @@ def main():
             row = {
                 "sequence": pair["sequence"],
                 "frame": pair["frame"],
-                "img_a": str(pair["img_a"]),
-                "img_b": str(pair["img_b"]),
-                "flow_gt": str(pair["flow"]),
-                "invalid_mask": str(pair["invalid"]) if pair["invalid"] else "",
+                "img_a": repo_rel(pair["img_a"]),
+                "img_b": repo_rel(pair["img_b"]),
+                "flow_gt": repo_rel(pair["flow"]),
+                "invalid_mask": repo_rel(pair["invalid"]) if pair["invalid"] else "",
                 "mean_epe": err["mean_epe"],
                 "median_epe": err["median_epe"],
                 "p90_epe": err["p90_epe"],
@@ -473,8 +472,8 @@ def main():
         "median_epe_over_pairs": float(valid_df["median_epe"].median()) if len(valid_df) else None,
         "mean_p90_epe_over_pairs": float(valid_df["p90_epe"].mean()) if len(valid_df) else None,
         "mean_valid_pixel_ratio": float(valid_df["valid_pixel_ratio"].mean()) if len(valid_df) else None,
-        "output_dir": str(output_dir),
-        "per_pair_csv": str(csv_path),
+        "output_dir": repo_rel(output_dir),
+        "per_pair_csv": repo_rel(csv_path),
     }
 
     metrics_path = output_dir / "metrics.json"

@@ -13,6 +13,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+from repo_paths import repo_rel, resolve_path
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_FEATURES_CSV = BASE_DIR / "MotionResults" / "motion_v2_all" / "clip_motion_features.csv"
@@ -265,7 +267,7 @@ def main():
 
     args = parser.parse_args()
 
-    features_csv = Path(args.features_csv)
+    features_csv = resolve_path(args.features_csv)
 
     df, X, y, feature_cols = load_features(features_csv)
 
@@ -369,7 +371,7 @@ def main():
 
     metrics = {
         "created_at": datetime.now().isoformat(),
-        "features_csv": str(features_csv),
+        "features_csv": repo_rel(features_csv),
         "model": args.model,
         "split_mode": args.split_mode,
         "test_size": args.test_size,

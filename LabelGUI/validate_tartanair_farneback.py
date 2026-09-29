@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from azure.storage.blob import ContainerClient
 
+from repo_paths import repo_rel, resolve_path
+
 
 ACCOUNT_URL = "https://tartanair.blob.core.windows.net/"
 CONTAINER_NAME = "tartanair-release1"
@@ -394,8 +396,8 @@ def main():
         "median_epe_over_pairs": float(valid_df["median_epe"].median()) if len(valid_df) else None,
         "mean_p90_epe_over_pairs": float(valid_df["p90_epe"].mean()) if len(valid_df) else None,
         "mean_valid_pixel_ratio": float(valid_df["valid_pixel_ratio"].mean()) if len(valid_df) else None,
-        "output_dir": str(output_dir),
-        "per_pair_csv": str(per_pair_csv),
+        "output_dir": repo_rel(output_dir),
+        "per_pair_csv": repo_rel(per_pair_csv),
     }
 
     metrics_path = output_dir / "metrics.json"

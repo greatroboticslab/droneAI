@@ -10,6 +10,8 @@ from inference_sdk import InferenceHTTPClient
 
 import matplotlib.pyplot as plt
 
+from repo_paths import repo_rel
+
 
 BASE_DIR = Path(__file__).resolve().parent
 FRAME_DATASET_DIR = BASE_DIR / "FrameDataset"
@@ -504,8 +506,8 @@ def main():
         "detected_frames": int((frame_df["detected"] == True).sum()),
         "frame_detection_rate": float((frame_df["detected"] == True).mean()),
         "total_clips": int(features_df["clip_group"].nunique()),
-        "features_csv": str(features_path),
-        "frame_detections_csv": str(output_dir / "frame_detections.csv"),
+        "features_csv": repo_rel(features_path),
+        "frame_detections_csv": repo_rel(output_dir / "frame_detections.csv"),
     }
 
     with open(output_dir / "run_summary.json", "w", encoding="utf-8") as f:
