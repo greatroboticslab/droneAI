@@ -5,7 +5,11 @@ Export a video manifest from the labeling DB, one row per video, for the ML scri
     python LabelGUI/video_manifest.py --active-only        # only the active dataset
     python LabelGUI/video_manifest.py --out some/file.csv
 
-Default output: analysis/data/video_manifest.csv. The DB is opened read-only.
+Default outputs (the DB is opened read-only):
+    analysis/data/video_manifest.csv   one row per video (columns below)
+    analysis/data/session_videos.csv   one row per labeling session: which video it
+                                       labeled. Training scripts use it to group clips
+                                       by video (session_name is the clip folder name).
 
 Columns
     video_id         stable id per source video (YouTube id, file-<hash>, or url-<hash>)
@@ -30,6 +34,7 @@ Columns
 import argparse
 import csv
 import hashlib
+import re
 import sqlite3
 from pathlib import Path
 
@@ -38,6 +43,7 @@ from repo_paths import REPO_ROOT, repo_rel, resolve_path
 
 DEFAULT_DB = REPO_ROOT / "db" / "droneai.sqlite"
 DEFAULT_OUT = REPO_ROOT / "analysis" / "data" / "video_manifest.csv"
+DEFAULT_SESSIONS_OUT = REPO_ROOT / "analysis" / "data" / "session_videos.csv"
 
 EVENT_CLASSES = ("takeoff", "land", "minor-crash", "severe-crash")
 
@@ -46,6 +52,11 @@ COLUMNS = [
     "person_name", "labeled_by", "dataset_name", "item_key", "item_count",
     "final_sessions", "labeled_sid", "events_total",
     "n_takeoff", "n_land", "n_minor_crash", "n_severe_crash", "n_other", "updated_at",
+]
+
+SESSION_COLUMNS = [
+    "session_name", "folder_path", "sid", "status", "video_id", "view_type", "source",
+    "person_name", "events_count", "updated_at",
 ]
 
 # When one video is in several dataset rows, keep the most advanced one.
@@ -191,31 +202,97 @@ def build_video_manifest(db_path, active_only=False):
         conn.close()
 
 
-def write_video_manifest(rows, out_path):
+def session_folder_name(folder_path: str) -> str:
+    """
+    The session_name the frame dataset uses for a session folder
+    (same rule as frame_extraction_backend._safe_name on the folder's name).
+    """
+    name = Path((folder_path or "").replace("\\", "/")).name.strip()
+    name = re.sub(r'[<>:"/\\|?*]+', "_", name)
+    name = re.sub(r"\s+", "_", name)
+    name = re.sub(r"_+", "_", name)
+    name = name.strip("._ ")
+    return name or "unnamed"
+
+
+def build_session_map(db_path, manifest_rows=None):
+    """
+    One row per labeling session with a folder: session_name -> video_id (+ view
+    type and source of that video). A video labeled twice has two sessions (for
+    example Drone_1 and Drone_11); both map to the same video_id.
+    """
+    if manifest_rows is None:
+        manifest_rows = build_video_manifest(db_path)
+    by_vid = {r["video_id"]: r for r in manifest_rows}
+
+    conn = _connect_read_only(db_path)
+    try:
+        items = _load_items(conn, active_only=False)
+        vid_by_key = {}
+        for it in items:
+            vid_by_key.setdefault(link_key(it["youtube_link"]), item_video_id(it))
+
+        out = []
+        for r in conn.execute(
+            "SELECT sid, youtube_link, folder_path, status, person_name, events_count, "
+            "updated_at FROM validation_sessions ORDER BY COALESCE(updated_at, created_at, '')"
+        ):
+            if not (r["folder_path"] or "").strip():
+                continue
+            link = (r["youtube_link"] or "").strip()
+            vid = vid_by_key.get(link_key(link)) or item_video_id({"youtube_link": link})
+            video = by_vid.get(vid, {})
+            out.append({
+                "session_name": session_folder_name(r["folder_path"]),
+                "folder_path": (r["folder_path"] or "").replace("\\", "/"),
+                "sid": r["sid"],
+                "status": r["status"] or "",
+                "video_id": vid,
+                "view_type": video.get("view_type", "Unknown"),
+                "source": video.get("source", "Unknown"),
+                "person_name": r["person_name"] or video.get("person_name", ""),
+                "events_count": r["events_count"] or 0,
+                "updated_at": r["updated_at"] or "",
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def write_csv(rows, out_path, columns):
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
+        w = csv.DictWriter(f, fieldnames=columns)
         w.writeheader()
         w.writerows(rows)
     return out_path
+
+
+def write_video_manifest(rows, out_path):
+    return write_csv(rows, out_path, COLUMNS)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Export one row per video from the labeling DB.")
     parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite DB (default: db/droneai.sqlite)")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="CSV to write (default: analysis/data/video_manifest.csv)")
+    parser.add_argument("--sessions-out", default=str(DEFAULT_SESSIONS_OUT),
+                        help="Session-to-video map CSV (default: analysis/data/session_videos.csv)")
     parser.add_argument("--active-only", action="store_true", help="Only the active dataset")
     args = parser.parse_args()
 
     db_path = resolve_path(args.db, must_exist=True)
     rows = build_video_manifest(db_path, active_only=args.active_only)
     out = write_video_manifest(rows, resolve_path(args.out))
+    sessions = build_session_map(db_path, build_video_manifest(db_path))
+    sessions_out = write_csv(sessions, resolve_path(args.sessions_out), SESSION_COLUMNS)
 
     labeled = sum(1 for r in rows if r["status"] == "labeled")
     print(f"Wrote {len(rows)} videos ({labeled} labeled) to {repo_rel(out)}")
     totals = {c: sum(r[c] for r in rows) for c in ("n_takeoff", "n_land", "n_minor_crash", "n_severe_crash")}
     print("Events in finished sessions:", ", ".join(f"{k[2:]}={v}" for k, v in totals.items()))
+    print(f"Wrote {len(sessions)} labeling sessions to {repo_rel(sessions_out)}")
 
 
 if __name__ == "__main__":

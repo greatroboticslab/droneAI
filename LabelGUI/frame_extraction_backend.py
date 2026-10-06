@@ -189,9 +189,12 @@ def get_session_clips(session_name: str):
     return clips
 
 
-def extract_frames_from_session(session_name: str, sample_fps: float = 5.0, overwrite: bool = True):
+def extract_frames_from_session(session_name: str, sample_fps: float = 5.0, overwrite: bool = True,
+                                results_dir=None):
     """
     Extracts frames from all clips in one validation session.
+    results_dir: where the session folders are (default LabelGUI/ValidationResults;
+    a data snapshot has its own).
 
     Output:
       LabelGUI/FrameDataset/<label>/<session>__<clip>__frame_000001.jpg
@@ -202,10 +205,11 @@ def extract_frames_from_session(session_name: str, sample_fps: float = 5.0, over
     if sample_fps <= 0:
         sample_fps = 5.0
 
-    session_dir = VALIDATION_RESULTS_DIR / session_name
+    results_dir = Path(results_dir) if results_dir else VALIDATION_RESULTS_DIR
+    session_dir = results_dir / session_name
     clips_dir = session_dir / "clips"
 
-    if not _is_safe_child(VALIDATION_RESULTS_DIR, session_dir):
+    if not _is_safe_child(results_dir, session_dir):
         raise ValueError("Invalid session folder.")
 
     if not clips_dir.exists():

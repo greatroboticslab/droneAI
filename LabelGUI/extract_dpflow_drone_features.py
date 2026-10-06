@@ -208,7 +208,9 @@ def get_bbox_columns(df):
 
 
 def load_detections(detections_path):
-    if not detections_path:
+    # "none" (or "") = no drone boxes, e.g. FPV, where the drone is the camera.
+    if not detections_path or str(detections_path).strip().lower() == "none":
+        print("No drone detections: using whole-frame motion only.")
         return {}
 
     detections_path = _resolve_repo_path(detections_path)
@@ -486,6 +488,45 @@ def summarize_flow_in_roi(flow, roi, dt):
     }
 
 
+STILL_PX = 0.5  # flow below this many pixels per frame counts as "not moving"
+
+
+def summarize_whole_frame_flow(flow, dt):
+    """
+    Ego-motion of the camera from the whole frame (FPV: the drone is the camera,
+    so there is no drone box). Always computed, next to the ROI features.
+
+    divergence > 0: the image expands (moving toward what is ahead / dropping
+    onto the ground); curl: the image rotates (roll, spin); coherence near 1:
+    the whole frame moves together (smooth flight), near 0: chaotic (tumbling).
+    """
+    h, w = flow.shape[:2]
+    dx = np.nan_to_num(flow[:, :, 0].astype(np.float64))
+    dy = np.nan_to_num(flow[:, :, 1].astype(np.float64))
+    mag = np.sqrt(dx ** 2 + dy ** 2)
+    scale = float(max(w, h, 1))
+
+    du_dx = np.gradient(dx, axis=1)
+    dv_dy = np.gradient(dy, axis=0)
+    dv_dx = np.gradient(dy, axis=1)
+    du_dy = np.gradient(dx, axis=0)
+
+    mag_mean = float(mag.mean())
+    mean_vec = float(np.hypot(dx.mean(), dy.mean()))
+
+    return {
+        "frame_dx_norm_per_sec": float(dx.mean() / scale / dt),
+        "frame_dy_norm_per_sec": float(dy.mean() / scale / dt),
+        "frame_mag_norm_per_sec": float(mag_mean / scale / dt),
+        "frame_mag_std_norm_per_sec": float(mag.std() / scale / dt),
+        "frame_mag_p90_norm_per_sec": float(np.percentile(mag, 90) / scale / dt),
+        "frame_divergence_per_sec": float((du_dx + dv_dy).mean() / dt),
+        "frame_curl_per_sec": float((dv_dx - du_dy).mean() / dt),
+        "frame_still_fraction": float((mag < STILL_PX).mean()),
+        "frame_coherence": float(mean_vec / (mag_mean + 1e-9)),
+    }
+
+
 def det_motion_features(bbox_a, bbox_b, conf_a, conf_b, image_shape, dt):
     h, w = image_shape[:2]
 
@@ -699,7 +740,8 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--manifest", default="LabelGUI/FrameDataset/frame_manifest.csv")
-    parser.add_argument("--detections", default="LabelGUI/MotionResults/motion_v2_all/frame_detections.csv")
+    parser.add_argument("--detections", default="LabelGUI/MotionResults/motion_v2_all/frame_detections.csv",
+                        help='Drone box CSV for third-person videos, or "none" for whole-frame motion only (FPV).')
 
     parser.add_argument("--model", default="dpflow")
     parser.add_argument("--ckpt", default="things")
@@ -748,6 +790,13 @@ def main():
     print("FPS fallback:", args.fps)
 
     manifest_df, manifest_path = load_manifest(args.manifest)
+    data_snapshot = None
+    try:   # written by extract_labeled_frames.py --snapshot
+        data_snapshot = json.loads((Path(manifest_path).parent / "snapshot.json").read_text(encoding="utf-8"))
+        print(f"Data snapshot: {data_snapshot['id']} (fingerprint {data_snapshot['fingerprint'][:12]})")
+    except (OSError, ValueError, KeyError):
+        data_snapshot = None
+        print("Data snapshot: none (frames from the live DB)")
     detections = load_detections(args.detections)
 
     clip_groups = list(manifest_df["clip_group"].drop_duplicates())
@@ -823,6 +872,7 @@ def main():
                 any_detected = 1 if bbox_a_scaled is not None or bbox_b_scaled is not None else 0
 
                 flow_feats = summarize_flow_in_roi(flow, roi, dt)
+                frame_feats = summarize_whole_frame_flow(flow, dt)
                 det_feats = det_motion_features(
                     bbox_a_scaled,
                     bbox_b_scaled,
@@ -850,6 +900,7 @@ def main():
                     "both_detected": both_detected,
                     "any_detected": any_detected,
                     **flow_feats,
+                    **frame_feats,
                     **det_feats,
                 }
 
@@ -916,6 +967,7 @@ def main():
 
     run_summary = {
         "run_name": run_name,
+        "data_snapshot": data_snapshot,
         "flow_method": f"PTLFlow_{args.model}_{args.ckpt}",
         "model": args.model,
         "checkpoint": args.ckpt,

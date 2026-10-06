@@ -6,6 +6,23 @@
   <title>Shared Queue</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='toast.js') }}"></script>
+  <style>
+    .hero { display:flex; flex-wrap:wrap; gap:18px; align-items:center; justify-content:space-between; }
+    .hero h2 { margin:0 0 4px; }
+    .progress { height:10px; border-radius:999px; background:var(--secondary); overflow:hidden; margin:12px 0 8px; }
+    .progress__bar { height:100%; background:#22c55e; }
+    .next-btn { font-size:1.15em; padding:14px 26px; }
+    .q-row--done td { opacity:.55; }
+    .q-row--mine td { background:rgba(37,99,235,0.10); }
+    .q-actions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .q-actions form { margin:0; }
+    details.opts summary { cursor:pointer; color:var(--muted); font-size:.85em; list-style:none; }
+    details.opts summary::-webkit-details-marker { display:none; }
+    details.opts[open] { margin-top:6px; }
+    details.opts label { margin-top:6px; }
+    .kbd-hint { color:var(--muted); font-size:.85em; }
+    .section-row td { background:transparent; color:var(--muted); font-size:.8em; text-transform:uppercase; letter-spacing:.06em; padding-top:18px; }
+  </style>
 </head>
 <body>
 <header class="topbar">
@@ -26,15 +43,28 @@
 
 <main class="container">
   {% if dataset %}
+    {% set pct = (100 * stats.labeled / stats.total) | round | int if stats.total else 0 %}
     <div class="card" style="margin-bottom:18px;">
-      <h2>{{ dataset.dataset_name }}</h2>
-      <p class="muted">{{ dataset.original_filename }}</p>
-
-      <div class="actions">
-        <span class="chip">Total: {{ stats.total }}</span>
-        <span class="chip">Not Labeled: {{ stats.not_labeled }}</span>
-        <span class="chip">In Progress: {{ stats.in_progress }}</span>
-        <span class="chip">Labeled: {{ stats.labeled }}</span>
+      <div class="hero">
+        <div style="flex:1; min-width:260px;">
+          <h2>{{ dataset.dataset_name }}</h2>
+          <p class="muted" style="margin:0;">
+            <b style="color:var(--text);">{{ stats.labeled }} / {{ stats.total }}</b> labeled
+            · {{ stats.not_labeled }} to do
+            {% if stats.in_progress %}· {{ stats.in_progress }} in progress{% endif %}
+          </p>
+          <div class="progress"><div class="progress__bar" style="width:{{ pct }}%"></div></div>
+          {% if dataset.original_filename.lower().endswith(('.xlsx', '.xls')) %}
+            <a class="muted" style="font-size:.85em;" href="{{ url_for('download_dataset_workbook', dataset_key=dataset.dataset_key) }}">Download labeling Excel</a>
+          {% endif %}
+        </div>
+        <form id="next-form" method="POST" action="{{ url_for('queue_next_item') }}">
+          <input type="hidden" name="dataset_key" value="{{ dataset.dataset_key }}">
+          <button class="btn btn--primary next-btn" type="submit" {% if not stats.not_labeled %}disabled{% endif %}>
+            {% if stats.not_labeled %}Label next video →{% else %}All videos labeled ✓{% endif %}
+          </button>
+          <div class="kbd-hint" style="text-align:center; margin-top:6px;">or press <b>Enter</b></div>
+        </form>
       </div>
     </div>
 
@@ -48,14 +78,22 @@
             <th>View</th>
             <th>Source</th>
             <th>Status</th>
-            <th>Labeled By</th>
-            <th>Locked By</th>
-            <th>Action</th>
+            <th>By</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
+          {% set ns = namespace(section='') %}
           {% for item in items %}
-          <tr>
+          {% if item.status == 'labeled' %}{% set section = 'Labeled' %}
+          {% elif item.status == 'in_progress' and item.locked_by == username %}{% set section = 'Yours, not finished' %}
+          {% elif item.status == 'in_progress' %}{% set section = 'Being labeled by others' %}
+          {% else %}{% set section = 'To label' %}{% endif %}
+          {% if section != ns.section %}
+            {% set ns.section = section %}
+            <tr class="section-row"><td colspan="8">{{ section }}</td></tr>
+          {% endif %}
+          <tr class="{% if item.status == 'labeled' %}q-row--done{% elif item.locked_by == username %}q-row--mine{% endif %}">
             <td>{{ item.row_index }}</td>
             <td><b>{{ item.person_name }}</b></td>
             <td class="truncate" title="{{ item.youtube_link }}">
@@ -72,47 +110,38 @@
                 <span class="chip chip--no">Not Labeled</span>
               {% endif %}
             </td>
-            <td>{{ item.labeled_by or '-' }}</td>
-            <td>{{ item.locked_by or '-' }}</td>
+            <td>{{ item.labeled_by or item.locked_by or '-' }}</td>
             <td>
               {% if not item.locked_by or item.locked_by == username %}
-                <form method="POST" action="/queue/start/{{ item.item_key }}">
-                  <label>Scenario</label>
-                  <select name="scenario_type">
-                    <option value="Simulation" {% if item.source == 'Simulation' %}selected{% endif %}>Simulation</option>
-                    <option value="Real flight" {% if item.source == 'Real' %}selected{% endif %}>Real flight</option>
-                  </select>
-            
-                  <label>Output Folder</label>
-                  <input
-                    name="output_folder_name"
-                    placeholder="Example: Ashleigh_Trial_1"
-                    value="{{ item.person_name|replace(' ', '_')|replace('|', '_') }}"
-                  >
-            
-                  {% if not item.local_path %}
-                  <label style="display:flex; gap:8px; align-items:center; margin-top:8px;">
-                    <input type="checkbox" name="delete_original" style="width:auto;">
-                    Delete original
-                  </label>
-                  {% endif %}
-            
-                  <button class="btn btn--primary" type="submit" style="margin-top:8px;">
-                    {% if item.status == 'labeled' %}
-                      Relabel
-                    {% elif item.status == 'in_progress' %}
-                      Resume
-                    {% else %}
-                      Start
+                <form method="POST" action="/queue/start/{{ item.item_key }}" class="start-form">
+                  <div class="q-actions">
+                    <button class="btn {% if item.status == 'labeled' %}btn--secondary{% else %}btn--primary{% endif %}" type="submit">
+                      {% if item.status == 'labeled' %}Relabel{% elif item.status == 'in_progress' %}Resume{% else %}Label{% endif %}
+                    </button>
+                    {% if item.status == 'labeled' or item.status == 'in_progress' %}
+                      <button class="btn btn--ghost" type="submit"
+                              formaction="/queue/reset/{{ item.item_key }}"
+                              onclick="return confirm('Reset this video to Not Labeled?')">Reset</button>
                     {% endif %}
-                  </button>
+                  </div>
+                  <details class="opts">
+                    <summary>Options</summary>
+                    <label>Scenario</label>
+                    <select name="scenario_type">
+                      <option value="Simulation" {% if item.source != 'Real' %}selected{% endif %}>Simulation</option>
+                      <option value="Real flight" {% if item.source == 'Real' %}selected{% endif %}>Real flight</option>
+                    </select>
+                    <label>Output folder</label>
+                    <input name="output_folder_name"
+                           value="{{ item.person_name|replace(' ', '_')|replace('|', '_') }}">
+                    {% if not item.local_path %}
+                    <label style="display:flex; gap:8px; align-items:center;">
+                      <input type="checkbox" name="delete_original" style="width:auto;">
+                      Delete original after labeling
+                    </label>
+                    {% endif %}
+                  </details>
                 </form>
-            
-                {% if item.status == 'labeled' or item.status == 'in_progress' %}
-                  <form method="POST" action="/queue/reset/{{ item.item_key }}" style="margin-top:8px;">
-                    <button class="btn btn--secondary" type="submit">Reset</button>
-                  </form>
-                {% endif %}
               {% else %}
                 <span class="muted">Locked</span>
               {% endif %}
@@ -131,29 +160,27 @@
 </main>
 
 <script>
-  // Let the labeler know the click registered - fetching a video takes a while.
-  document.querySelectorAll('form[action^="/queue/start/"]').forEach(f => {
-    f.addEventListener('submit', () => {
-      const btn = f.querySelector('button[type="submit"]');
-      // Defer: disabling inside the submit handler can cancel the submission.
-      setTimeout(() => {
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = 'Starting…';
-        }
-      }, 0);
-      showToast({
-        type: 'info',
-        message: 'Getting the video ready…',
-        duration: 0
-      });
+  {% if request.args.get('all_done') %}
+    showToast({type: 'success', title: 'Nothing left to label', message: 'Every video in this dataset is labeled or being labeled.', duration: 8000});
+  {% endif %}
+
+  // Let the labeler know the click registered.
+  document.querySelectorAll('form').forEach(f => {
+    f.addEventListener('submit', (e) => {
+      const btn = e.submitter;
+      setTimeout(() => { if (btn) btn.disabled = true; }, 0);
+      const resetting = btn && btn.getAttribute('formaction');
+      showToast({type: 'info', message: resetting ? 'Resetting…' : 'Opening the video…', duration: 0});
     });
   });
 
-  document.querySelectorAll('form[action^="/queue/reset/"]').forEach(f => {
-    f.addEventListener('submit', () => {
-      showToast({ type: 'info', message: 'Resetting…', duration: 0 });
-    });
+  // Enter anywhere (outside a form field) = label the next video.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.repeat) return;
+    if (e.target.closest('input, select, textarea, button, summary, a')) return;
+    const nextForm = document.getElementById('next-form');
+    const nextBtn = nextForm && nextForm.querySelector('button');
+    if (nextBtn && !nextBtn.disabled) nextForm.requestSubmit(nextBtn);
   });
 </script>
 </body>

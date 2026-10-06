@@ -8,8 +8,8 @@ from frame_extraction_backend import (
     extract_frames_from_uploaded_clip_folder,
     FRAME_DATASET_DIR,
 )
+from training_dashboard import load_training_dashboard
 from optical_flow_gui_backend import (
-    load_optical_flow_dashboard_data,
     load_optical_flow_clip_explorer_data,
     OPTICAL_FLOW_DEBUG_DIR,
 )
@@ -39,15 +39,18 @@ from dataset_import import (
 
 # ===================== VALIDATION BACKEND =====================
 from validation_backend import (
-    start_validation_thread,
+    start_validation_async,
+    cancel_validation,
+    undo_last_event,
+    list_current_events,
     get_crash_count,
     mark_event_now,
     is_video_done,
     get_extraction_progress,
     toggle_pause,
     skip_video,
-    get_current_validation_link,
     get_validation_status,
+    finish_validation_early,
 )
 
 # ===================== TRAINING BACKEND =====================
@@ -182,13 +185,12 @@ def handle_mqtt_event(data: dict):
     elif event_type == "item_labeled":
         item_key = data.get("item_key")
         if item_key:
-            db.update_dataset_item(
-                item_key=item_key,
-                status="labeled",
-                labeled_by=data.get("by", ""),
-                locked_by="",
-                scenario_type=data.get("scenario_type", ""),
-            )
+            db.complete_dataset_item(item_key, data.get("by", ""), data.get("scenario_type", ""))
+
+    elif event_type == "item_removed":
+        item_key = data.get("item_key")
+        if item_key and db.get_dataset_item(item_key):
+            db.remove_unavailable_dataset_item(item_key)
 
     elif event_type == "queue_released":
         item_key = data.get("item_key")
@@ -198,6 +200,11 @@ def handle_mqtt_event(data: dict):
                 status=data.get("status", "not_labeled"),
                 locked_by="",
             )
+
+    elif event_type == "item_reset":
+        item_key = data.get("item_key")
+        if item_key and db.get_dataset_item(item_key):
+            db.reset_dataset_item(item_key)
 
 def clean_folder_name(name):
     name = (name or "").strip()
@@ -243,7 +250,8 @@ def validation_index():
         if locked:
             return f"This video is currently being labeled by {by_user}. Please wait or import the latest DB first.", 400
 
-        start_validation_thread(
+        cancel_validation(_current_sid())
+        session["current_validation_sid"] = start_validation_async(
             youtube_link=youtube_link,
             folder_name=folder_name,
             delete_original=delete_original,
@@ -265,61 +273,136 @@ def validation_index():
 @login_required
 def validation_view_stream():
     source = request.args.get("source", "manual")
-    return render_template("validation_results.html", source=source)
+    item = None
+    stats = None
+    if source == "dataset" and session.get("current_item_key"):
+        item = db.get_dataset_item(session["current_item_key"])
+        if item:
+            stats = db.dataset_stats(item["dataset_key"])
+    return render_template("validation_results.html", source=source, item=item, stats=stats)
+
+
+def _current_sid():
+    """The labeling session of whoever is making this request."""
+    return session.get("current_validation_sid")
 
 
 @app.route("/validation_video_feed")
+@login_required
 def validation_video_feed():
     from validation_backend import generate_video_stream
-    return Response(generate_video_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
+    # Read the sid now: the stream runs after this request's context is gone.
+    return Response(generate_video_stream(_current_sid()),
+                    mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/validation_status")
 @login_required
 def validation_status():
     """Download / stream status so the UI can show a real message instead of a blank frame."""
-    return jsonify(get_validation_status())
+    sid = _current_sid()
+    status = get_validation_status(sid)
+    status["session_status"] = db.get_validation_session_status(sid) if sid else None
+    return jsonify(status)
+
+
+@app.route("/validation_finish", methods=["POST"])
+@login_required
+def validation_finish():
+    sid = _current_sid()
+    if not sid:
+        return jsonify(ok=False, error="No validation session is active."), 400
+    current = db.get_validation_session_status(sid)
+    if current == "final":
+        return jsonify(ok=True)
+    if current != "running" or not finish_validation_early(sid):
+        return jsonify(ok=False, error="The video is not ready to save."), 409
+    return jsonify(ok=True)
 
 
 @app.route("/mark_event", methods=["POST"])
+@login_required
 def mark_event():
     data = request.get_json() or {}
     event_type = data.get("event", "unknown")
-    mark_event_now(event_type)
-    return jsonify(success=True, event=event_type)
+    if event_type not in ("takeoff", "land", "minor-crash", "severe-crash"):
+        return jsonify(success=False, error="Unknown event type."), 400
+    sid = _current_sid()
+    saved = mark_event_now(sid, event_type, reviewer=session.get("user", ""))
+    if not saved:
+        status = get_validation_status(sid)
+        if status.get("state") == "idle":
+            error = "This video is no longer open - reload the page."
+        elif status.get("state") != "ready":
+            error = "The video isn't playing yet."
+        elif status.get("done"):
+            error = "This video is already being saved."
+        else:
+            error = "Could not save the mark - try again."
+        return jsonify(success=False, error=error), 409
+    return jsonify(success=True, event=event_type, mark=saved)
+
+
+@app.route("/undo_event", methods=["POST"])
+@login_required
+def undo_event():
+    removed = undo_last_event(_current_sid())
+    if not removed:
+        return jsonify(success=False, error="Nothing to undo."), 409
+    return jsonify(success=True, removed=removed)
+
+
+@app.route("/validation_events")
+@login_required
+def validation_events():
+    return jsonify(events=list_current_events(_current_sid()))
 
 
 @app.route("/check_status")
+@login_required
 def check_status():
-    return "done" if is_video_done() else "running"
+    return "done" if is_video_done(_current_sid()) else "running"
 
 
 @app.route("/get_crash_count")
+@login_required
 def get_crash_count_api():
-    return str(get_crash_count())
+    return str(get_crash_count(_current_sid()))
 
 
 @app.route("/get_extraction_progress")
+@login_required
 def get_extraction_progress_api():
-    return jsonify(get_extraction_progress())
+    return jsonify(get_extraction_progress(_current_sid()))
 
 
 @app.route("/toggle_pause", methods=["POST"])
+@login_required
 def pause_resume():
-    paused = toggle_pause()
+    paused = toggle_pause(_current_sid())
     return jsonify({"paused": paused}), 200
 
 
 @app.route("/rewind", methods=["POST"])
+@login_required
 def rewind_video():
-    skip_video(-10)
+    skip_video(_current_sid(), -_seek_seconds())
     return ("", 204)
 
 
 @app.route("/fast_forward", methods=["POST"])
+@login_required
 def fast_forward_video():
-    skip_video(10)
+    skip_video(_current_sid(), _seek_seconds())
     return ("", 204)
+
+
+def _seek_seconds():
+    """Jump size from ?s= (the player sends 5 or 10); defaults to 10."""
+    try:
+        return min(max(float(request.args.get("s", 10)), 1.0), 60.0)
+    except ValueError:
+        return 10.0
 
 
 ###############################################################################
@@ -399,7 +482,8 @@ def start_from_excel():
     if locked:
         return f"This video is currently being labeled by {by_user}. Please wait or import the latest DB first.", 400
 
-    start_validation_thread(
+    cancel_validation(_current_sid())
+    session["current_validation_sid"] = start_validation_async(
         youtube_link=match["link"],
         folder_name=None,
         delete_original=delete_original,
@@ -1050,7 +1134,10 @@ def queue_page():
         dataset_key = active["dataset_key"]
 
     dataset = db.get_dataset(dataset_key)
-    items = db.list_dataset_items(dataset_key)
+    username = session.get("user")
+    # Work to do first, finished videos at the bottom.
+    items = sorted(db.list_dataset_items(dataset_key), key=lambda it: (
+        _queue_rank(it, username), it["row_index"]))
     stats = db.dataset_stats(dataset_key)
 
     return render_template(
@@ -1062,33 +1149,48 @@ def queue_page():
         role=session.get("role"),
     )
 
-@app.route("/queue/start/<item_key>", methods=["POST"])
+
+@app.route("/datasets/<dataset_key>/download")
 @login_required
-def queue_start_item(item_key):
-    item = db.get_dataset_item(item_key)
-    if not item:
-        return "Item not found.", 404
+def download_dataset_workbook(dataset_key):
+    dataset = db.get_dataset(dataset_key)
+    blob = db.get_dataset_file_blob(dataset_key)
+    if not dataset or not blob:
+        abort(404)
+    mime = ("application/vnd.ms-excel" if dataset["original_filename"].lower().endswith(".xls")
+            else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    return send_file(io.BytesIO(blob), as_attachment=True,
+                     download_name=dataset["original_filename"],
+                     mimetype=mime)
 
+def _queue_rank(item, username):
+    if item["status"] == "in_progress" and item["locked_by"] == username:
+        return 0
+    if item["status"] == "not_labeled":
+        return 1
+    if item["status"] == "in_progress":
+        return 2
+    return 3
+
+
+def default_scenario(item):
+    return "Real flight" if (item.get("source") or "") == "Real" else "Simulation"
+
+
+def _start_queue_item(item, scenario_type, output_folder_name, delete_original):
+    """
+    Claim a queue row and start fetching its video in the background.
+    Returns the redirect to the player, or None if someone else claimed it first.
+    """
     current_user = session.get("user", "unknown")
-    if item["locked_by"] and item["locked_by"] != current_user:
-        return f"This video is currently being labeled by {item['locked_by']}.", 400
-
-    scenario_type = request.form.get("scenario_type", "Simulation")
-    delete_original = True if request.form.get("delete_original") == "on" else False
-
-    output_folder_name = request.form.get("output_folder_name", "").strip()
+    item_key = item["item_key"]
 
     if not output_folder_name:
         output_folder_name = f"{item['row_index']:03d}_{item['person_name']}"
-
     output_folder_name = clean_folder_name(output_folder_name)
 
-    db.update_dataset_item(
-        item_key=item_key,
-        status="in_progress",
-        locked_by=current_user,
-        scenario_type=scenario_type,
-    )
+    if not db.claim_dataset_item(item_key, current_user, scenario_type):
+        return None
 
     mqtt_mgr.publish_event("queue_claimed", {
         "item_key": item_key,
@@ -1107,7 +1209,8 @@ def queue_start_item(item_key):
     if item.get("local_path"):
         local_video_path = str(REPO_DIR / item["local_path"])
 
-    start_validation_thread(
+    cancel_validation(_current_sid())
+    session["current_validation_sid"] = start_validation_async(
         youtube_link=item["youtube_link"],
         folder_name=output_folder_name,
         delete_original=delete_original,
@@ -1126,6 +1229,89 @@ def queue_start_item(item_key):
 
     return redirect(url_for("validation_view_stream", source="dataset"))
 
+
+@app.route("/queue/start/<item_key>", methods=["POST"])
+@login_required
+def queue_start_item(item_key):
+    item = db.get_dataset_item(item_key)
+    if not item:
+        return "Item not found.", 404
+
+    current_user = session.get("user", "unknown")
+    if item["locked_by"] and item["locked_by"] != current_user:
+        return f"This video is currently being labeled by {item['locked_by']}.", 400
+
+    started = _start_queue_item(
+        item,
+        scenario_type=request.form.get("scenario_type") or default_scenario(item),
+        output_folder_name=request.form.get("output_folder_name", "").strip() or item["person_name"],
+        delete_original=request.form.get("delete_original") == "on",
+    )
+    if started is None:
+        return "Someone else just started this video. Go back to the queue and pick another.", 409
+    return started
+
+
+@app.route("/queue/next", methods=["POST"])
+@login_required
+def queue_next_item():
+    """Start the next unlabeled video, skipping ones this labeler skipped."""
+    dataset_key = request.form.get("dataset_key")
+    if not dataset_key:
+        active = db.get_active_dataset()
+        dataset_key = active["dataset_key"] if active else None
+    if not dataset_key:
+        return redirect(url_for("queue_page"))
+
+    current_user = session.get("user", "unknown")
+    skipped = set(session.get("skipped_items", []))
+    candidates = [
+        it for it in db.list_dataset_items(dataset_key)
+        if it["status"] == "not_labeled"
+        and (not it["locked_by"] or it["locked_by"] == current_user)
+    ]
+    if not candidates:
+        return redirect(url_for("queue_page", dataset_key=dataset_key, all_done=1))
+    candidates.sort(key=lambda it: (it["item_key"] in skipped, it["row_index"]))
+    # Someone may claim a candidate between the list and the claim; try the next.
+    for item in candidates:
+        started = _start_queue_item(
+            item,
+            scenario_type=default_scenario(item),
+            output_folder_name=item["person_name"],
+            delete_original=False,
+        )
+        if started is not None:
+            return started
+    return redirect(url_for("queue_page", dataset_key=dataset_key, all_done=1))
+
+
+@app.route("/queue/skip", methods=["POST"])
+@login_required
+def queue_skip_item():
+    """Put the current video back in the queue unlabeled and move on."""
+    current_user = session.get("user", "unknown")
+    item_key = session.get("current_item_key")
+    item = db.get_dataset_item(item_key) if item_key else None
+    if not item:
+        return redirect(url_for("queue_page"))
+
+    cancel_validation(_current_sid())
+    if item["status"] != "labeled":
+        db.update_dataset_item(item_key=item_key, status="not_labeled", labeled_by="",
+                               locked_by="", scenario_type="")
+        mqtt_mgr.publish_event("queue_released", {
+            "item_key": item_key, "status": "not_labeled", "by": current_user,
+        })
+    mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "released")
+
+    session["skipped_items"] = list(dict.fromkeys(session.get("skipped_items", []) + [item_key]))
+    for key in ("current_item_key", "current_youtube_link",
+                "current_scenario_type", "current_validation_sid"):
+        session.pop(key, None)
+
+    return queue_next_item()
+
 @app.route("/queue/reset/<item_key>", methods=["POST"])
 @login_required
 def queue_reset_item(item_key):
@@ -1140,13 +1326,10 @@ def queue_reset_item(item_key):
     if item["locked_by"] and item["locked_by"] != current_user:
         return f"This video is currently locked by {item['locked_by']}.", 400
 
-    db.update_dataset_item(
-        item_key=item_key,
-        status="not_labeled",
-        labeled_by="",
-        locked_by="",
-        scenario_type="",
-    )
+    try:
+        db.reset_dataset_item(item_key)
+    except ValueError as exc:
+        return str(exc), 409
 
     mqtt_mgr.publish_event("item_reset", {
         "item_key": item_key,
@@ -1167,8 +1350,11 @@ def validation_release_lock():
 
     # A session that never got a video is NOT a labeled item - put it back in
     # the queue instead of silently marking it done.
-    status_info = get_validation_status()
+    status_info = get_validation_status(_current_sid())
     failed = status_info.get("state") == "failed"
+    sid = session.get("current_validation_sid")
+    if not failed and db.get_validation_session_status(sid) != "final":
+        return jsonify(ok=False, error="The event clips are still being saved."), 409
 
     if item_key:
         if failed:
@@ -1186,13 +1372,10 @@ def validation_release_lock():
                 "by": current_user,
             })
         else:
-            db.update_dataset_item(
-                item_key=item_key,
-                status="labeled",
-                labeled_by=current_user,
-                locked_by="",
-                scenario_type=scenario_type,
-            )
+            try:
+                db.complete_dataset_item(item_key, current_user, scenario_type)
+            except ValueError as exc:
+                return jsonify(ok=False, error=str(exc)), 409
 
             mqtt_mgr.publish_event("item_labeled", {
                 "item_key": item_key,
@@ -1202,12 +1385,36 @@ def validation_release_lock():
 
         mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "released")
 
-        session.pop("current_item_key", None)
-        session.pop("current_dataset_key", None)
-        session.pop("current_youtube_link", None)
-        session.pop("current_scenario_type", None)
+        if not failed:
+            for key in ("current_item_key", "current_dataset_key", "current_youtube_link",
+                        "current_scenario_type", "current_validation_sid"):
+                session.pop(key, None)
 
     return jsonify({"ok": True, "released_as": "not_labeled" if failed else "labeled"})
+
+
+@app.route("/validation_remove_unavailable", methods=["POST"])
+@login_required
+def validation_remove_unavailable():
+    item_key = session.get("current_item_key")
+    item = db.get_dataset_item(item_key) if item_key else None
+    status = get_validation_status(_current_sid())
+    if (not item or not status.get("can_remove_unavailable")
+            or item["youtube_link"] != status.get("link")):
+        return jsonify(ok=False, error="No failed queue video is available to remove."), 409
+    current_user = session.get("user", "unknown")
+    if item["locked_by"] and item["locked_by"] != current_user:
+        return jsonify(ok=False, error="This row is locked by another labeler."), 403
+    try:
+        db.remove_unavailable_dataset_item(item_key)
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 409
+    mqtt_mgr.publish_event("item_removed", {"item_key": item_key, "dataset_key": item["dataset_key"], "by": current_user})
+    mqtt_mgr.publish_lock(f"item:{item_key}", current_user, "released")
+    for key in ("current_item_key", "current_dataset_key", "current_youtube_link",
+                "current_scenario_type", "current_validation_sid"):
+        session.pop(key, None)
+    return jsonify(ok=True, queue_url=url_for("queue_page", dataset_key=item["dataset_key"]))
 
 @app.route("/agent", methods=["GET", "POST"])
 @login_required
@@ -1354,9 +1561,20 @@ def vit_results_page():
     )
 
 @app.route("/optical_flow")
+@login_required
 def optical_flow_dashboard():
-    data = load_optical_flow_dashboard_data()
+    data = load_training_dashboard(request.args.get("run", ""), db_path=DB_PATH)
     return render_template("optical_flow_dashboard.html", data=data)
+
+@app.route("/snapshots/<path:filename>")
+@login_required
+def download_snapshot(filename):
+    from data_snapshot import SNAPSHOTS_DIR
+    # Only the zip files directly in snapshots/, nothing else.
+    if "/" in filename or "\\" in filename or not filename.endswith(".zip"):
+        abort(404)
+    return send_from_directory(SNAPSHOTS_DIR, filename, as_attachment=True)
+
 
 @app.route("/optical_flow/clip")
 def optical_flow_clip_explorer():

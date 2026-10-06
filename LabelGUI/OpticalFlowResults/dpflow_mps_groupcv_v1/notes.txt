@@ -1,0 +1,3 @@
+DroneAI DPFlow feature extraction run.
+This run uses PTLFlow DPFlow optical flow to generate sequence-level motion features.
+Do not delete this folder. Results may be used for paper tracking.

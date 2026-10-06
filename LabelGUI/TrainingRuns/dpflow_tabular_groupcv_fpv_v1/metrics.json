@@ -1,0 +1,175 @@
+{
+  "run_name": "dpflow_tabular_groupcv_fpv_v1",
+  "stage": "tabular_training",
+  "input_features_csv": "LabelGUI/OpticalFlowResults/dpflow_mps_groupcv_v1/flow_sequence_features.csv",
+  "split_mode": "grouped_kfold_video",
+  "folds": 5,
+  "seed": 42,
+  "view_type_filter": "FPV",
+  "held_out_test_videos_file": "analysis/data/test_videos.csv",
+  "held_out_test_videos": 13,
+  "held_out_clips_removed": 32,
+  "clips_before_filters": 173,
+  "total_clips": 71,
+  "total_videos": 23,
+  "grouping": {
+    "video_map": "analysis/data/session_videos.csv",
+    "clips_video_id_from_features": 0,
+    "clips_video_id_from_map": 173,
+    "clips_grouped_by_session_fallback": 0
+  },
+  "labels": [
+    "land",
+    "minor-crash",
+    "severe-crash",
+    "takeoff"
+  ],
+  "label_counts": {
+    "takeoff": 29,
+    "minor-crash": 18,
+    "severe-crash": 14,
+    "land": 10
+  },
+  "feature_count": 955,
+  "best_model": "random_forest",
+  "accuracy": 0.5390384615384616,
+  "accuracy_std": 0.13668019608791115,
+  "macro_f1": 0.4317551892551893,
+  "macro_f1_std": 0.1308068079246336,
+  "weighted_f1": 0.5075627289377288,
+  "weighted_f1_std": 0.1363917728561905,
+  "per_fold_best_model": [
+    {
+      "fold": 0,
+      "val_clips": 16,
+      "val_labels": [
+        "land",
+        "minor-crash",
+        "severe-crash",
+        "takeoff"
+      ],
+      "accuracy": 0.6875,
+      "macro_f1": 0.5097222222222222,
+      "weighted_f1": 0.6253472222222223
+    },
+    {
+      "fold": 1,
+      "val_clips": 15,
+      "val_labels": [
+        "land",
+        "minor-crash",
+        "severe-crash",
+        "takeoff"
+      ],
+      "accuracy": 0.5333333333333333,
+      "macro_f1": 0.4173076923076923,
+      "weighted_f1": 0.5323076923076923
+    },
+    {
+      "fold": 2,
+      "val_clips": 15,
+      "val_labels": [
+        "land",
+        "minor-crash",
+        "severe-crash",
+        "takeoff"
+      ],
+      "accuracy": 0.6666666666666666,
+      "macro_f1": 0.6345238095238095,
+      "weighted_f1": 0.6698412698412698
+    },
+    {
+      "fold": 3,
+      "val_clips": 13,
+      "val_labels": [
+        "land",
+        "minor-crash",
+        "severe-crash",
+        "takeoff"
+      ],
+      "accuracy": 0.3076923076923077,
+      "macro_f1": 0.33531746031746035,
+      "weighted_f1": 0.30158730158730157
+    },
+    {
+      "fold": 4,
+      "val_clips": 12,
+      "val_labels": [
+        "land",
+        "minor-crash",
+        "severe-crash",
+        "takeoff"
+      ],
+      "accuracy": 0.5,
+      "macro_f1": 0.2619047619047619,
+      "weighted_f1": 0.4087301587301588
+    }
+  ],
+  "all_model_results": [
+    {
+      "model": "random_forest",
+      "accuracy": 0.5390384615384616,
+      "accuracy_std": 0.13668019608791115,
+      "macro_f1": 0.4317551892551893,
+      "macro_f1_std": 0.1308068079246336,
+      "weighted_f1": 0.5075627289377288,
+      "weighted_f1_std": 0.1363917728561905
+    },
+    {
+      "model": "extra_trees",
+      "accuracy": 0.5215384615384615,
+      "accuracy_std": 0.15180136853734005,
+      "macro_f1": 0.3519829924976984,
+      "macro_f1_std": 0.14100234929811795,
+      "weighted_f1": 0.44833963911905084,
+      "weighted_f1_std": 0.16128470112234208
+    },
+    {
+      "model": "gradient_boosting",
+      "accuracy": 0.469102564102564,
+      "accuracy_std": 0.16303156118012366,
+      "macro_f1": 0.3756209150326797,
+      "macro_f1_std": 0.14776020594240596,
+      "weighted_f1": 0.4291825516531399,
+      "weighted_f1_std": 0.16319252814174676
+    },
+    {
+      "model": "hist_gradient_boosting",
+      "accuracy": 0.4573717948717949,
+      "accuracy_std": 0.09051999317842999,
+      "macro_f1": 0.3860648338589515,
+      "macro_f1_std": 0.1072519198357198,
+      "weighted_f1": 0.43728971192206484,
+      "weighted_f1_std": 0.09744335323723936
+    },
+    {
+      "model": "logistic_regression",
+      "accuracy": 0.4098717948717949,
+      "accuracy_std": 0.1308456287643283,
+      "macro_f1": 0.3303571428571428,
+      "macro_f1_std": 0.10682654661047779,
+      "weighted_f1": 0.4054422059422059,
+      "weighted_f1_std": 0.11618474927289803
+    },
+    {
+      "model": "svm_rbf",
+      "accuracy": 0.4881410256410256,
+      "accuracy_std": 0.07953214195661874,
+      "macro_f1": 0.35750721500721505,
+      "macro_f1_std": 0.1442262980236025,
+      "weighted_f1": 0.4375654391904392,
+      "weighted_f1_std": 0.11362507333326194
+    },
+    {
+      "model": "xgboost",
+      "accuracy": 0.48403846153846153,
+      "accuracy_std": 0.10739664848212885,
+      "macro_f1": 0.37448412698412703,
+      "macro_f1_std": 0.11981824650072058,
+      "weighted_f1": 0.4552568172568172,
+      "weighted_f1_std": 0.11611396764646044
+    }
+  ],
+  "notes": "DPFlow sequence features summarized into one tabular vector per clip. Scores are mean +- std over K folds grouped by video_id (no video in both train and validation). best_model.pkl is the best model refit on all clips.",
+  "output_dir": "LabelGUI/TrainingRuns/dpflow_tabular_groupcv_fpv_v1"
+}

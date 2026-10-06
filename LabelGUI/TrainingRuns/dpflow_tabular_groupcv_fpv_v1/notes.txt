@@ -1,0 +1,3 @@
+DPFlow tabular model experiment, grouped K-fold cross-validation by video_id.
+Each clip is summarized into motion statistics such as speed peaks, acceleration, vertical motion, ROI size, and confidence.
+Keep this folder for paper result tracking.

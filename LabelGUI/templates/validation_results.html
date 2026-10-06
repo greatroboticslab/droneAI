@@ -1,35 +1,76 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Validation</title>
+  <title>Label video</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='toast.js') }}"></script>
   <style>
-    #done-overlay {
-      display: none;
-      margin-top: 16px;
-      padding: 16px;
-      border-radius: 8px;
-      background: #0f172a;
-      border: 1px solid #22c55e;
-      color: #e5e7eb;
-    }
-    #done-overlay h2 {
-      margin-top: 0;
-      color: #22c55e;
-    }
-    #done-buttons {
-      margin-top: 12px;
-    }
-    #done-buttons button {
-      margin-right: 10px;
-    }
-    #player-area.is-hidden { display: none; }
+    .lab-head { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin:14px 0 10px; }
+    .lab-head h1 { margin:0; font-size:1.25em; }
+    .lab-head .muted { font-size:.9em; }
+    .lab-head__links { display:flex; gap:8px; }
+
+    .lab { display:grid; grid-template-columns: minmax(0, 1fr) 300px; gap:16px; align-items:start; }
+    @media (max-width: 900px) { .lab { grid-template-columns: 1fr; } }
+
+    #video-feed { display:block; width:100%; max-height:68vh; object-fit:contain; background:#000; border-radius:10px; }
+    .transport { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    .transport button { flex:1; min-width:90px; }
+
+    .ev-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-top:12px; }
+    .ev-btn { position:relative; padding:16px 10px; font-size:1.05em; font-weight:700; border-radius:12px; text-align:left; }
+    .ev-btn kbd, .k { display:inline-block; min-width:22px; padding:1px 6px; margin-right:6px; border-radius:6px;
+                      border:1px solid var(--border); background:rgba(0,0,0,.35); font:600 .8em ui-monospace, monospace; text-align:center; }
+    .ev-btn .count { position:absolute; top:6px; right:8px; font-size:.8em; padding:1px 8px; border-radius:999px; background:rgba(255,255,255,.18); }
+    .ev-btn .count:empty { display:none; }
+    .ev-btn[data-event="takeoff"]      { border-left:5px solid #38bdf8; }
+    .ev-btn[data-event="land"]         { border-left:5px solid #22c55e; }
+    .ev-btn[data-event="minor-crash"]  { border-left:5px solid #f59e0b; }
+    .ev-btn[data-event="severe-crash"] { border-left:5px solid #ef4444; }
+    .ev-btn.flash { background:rgba(34,197,94,.35); }
+
+    .side { display:flex; flex-direction:column; gap:12px; }
+    .side .card { padding:14px; margin:0; }
+    .side h3 { margin:0 0 8px; font-size:1em; }
+    #marks { list-style:none; margin:0; padding:0; max-height:32vh; overflow:auto; }
+    #marks li { display:flex; justify-content:space-between; padding:6px 4px; border-bottom:1px solid var(--border); font-size:.95em; }
+    #marks li:last-child { border-bottom:0; }
+    #marks .t { color:var(--muted); font-variant-numeric:tabular-nums; }
+    #marks-empty { color:var(--muted); font-size:.9em; margin:0; }
+    #save-next { width:100%; padding:14px; font-size:1.05em; font-weight:700; }
+    #save-only, #skip-btn, #undo-btn { width:100%; }
+    #completion-note { color:var(--muted); font-size:.85em; margin:6px 0 0; }
+    .keys { font-size:.85em; color:var(--muted); line-height:1.9; margin:0; }
+
+    #player-area.is-hidden { display:none; }
+    #remove-unavailable { background:#7f1d1d; border-color:#ef4444; color:#fff; }
+    #status-actions { flex-wrap:wrap; }
+    #done-overlay { display:none; text-align:center; padding:30px; }
+    #done-overlay h2 { color:#22c55e; margin-top:0; }
   </style>
 </head>
 <body>
 <div class="container">
-  <h1>Validation</h1>
+  <div class="lab-head">
+    <div>
+      {% if item %}
+        <h1>Row {{ item.row_index }} · {{ item.person_name }}</h1>
+        <div class="muted">
+          {{ item.view_type or '' }}{% if item.view_type and item.source %} · {% endif %}{{ item.source or '' }}
+          {% if stats %} · {{ stats.labeled }} / {{ stats.total }} labeled{% endif %}
+        </div>
+      {% else %}
+        <h1>Label video</h1>
+      {% endif %}
+    </div>
+    <div class="lab-head__links">
+      {% if source == 'dataset' or source == 'excel' %}
+        <a class="btn btn--ghost" href="{{ url_for('queue_page') }}">Queue</a>
+      {% endif %}
+      <a class="btn btn--ghost" href="{{ url_for('home_page') }}">Dashboard</a>
+    </div>
+  </div>
 
   <!-- Shown while the video is being fetched, or if the fetch failed -->
   <div id="status-panel" class="statusPanel">
@@ -38,183 +79,302 @@
     <p id="status-msg" class="statusPanel__msg">This usually takes under a minute.</p>
     <div id="status-detail" class="statusPanel__detail" style="display:none;"></div>
     <div id="status-actions" class="statusPanel__actions" style="display:none;">
-      {% if source == 'excel' or source == 'dataset' %}
-        <button class="btn btn--primary" type="button"
-                onclick="window.location.href='{{ url_for('queue_page') }}'">
-          Back to Queue
+      {% if source == 'dataset' %}
+        <button class="btn btn--primary" type="button" onclick="skipVideo()">Skip to next video</button>
+        <button id="remove-unavailable" class="btn" type="button" style="display:none;">
+          Remove this video from the queue
         </button>
       {% endif %}
-      <button class="btn btn--secondary" type="button"
-              onclick="window.location.href='{{ url_for('home_page') }}'">
-        Dashboard
-      </button>
+      {% if source == 'excel' or source == 'dataset' %}
+        <button class="btn btn--secondary" type="button"
+                onclick="window.location.href='{{ url_for('queue_page') }}'">Back to Queue</button>
+      {% endif %}
     </div>
   </div>
 
-  <div id="player-area" class="is-hidden">
+  <div id="player-area" class="lab is-hidden">
     <div>
-      <img id="video-feed"
-           alt="Video stream"
-           style="width:100%; max-height:480px; object-fit:contain; border:1px solid #ccc;">
+      <img id="video-feed" alt="Video stream">
+      <div class="transport">
+        <button class="seek-btn" data-sec="-10" type="button" title="Shift + ←">« 10s</button>
+        <button class="seek-btn" data-sec="-5" type="button"><span class="k">←</span>5s</button>
+        <button id="pause-btn" type="button"><span class="k">Space</span><span id="pause-label">Pause</span></button>
+        <button class="seek-btn" data-sec="5" type="button">5s<span class="k" style="margin:0 0 0 6px;">→</span></button>
+        <button class="seek-btn" data-sec="10" type="button" title="Shift + →">10s »</button>
+      </div>
+      <div class="ev-grid">
+        <button class="ev-btn" data-event="takeoff" type="button"><kbd>T</kbd>Take-off<span class="count"></span></button>
+        <button class="ev-btn" data-event="land" type="button"><kbd>L</kbd>Land<span class="count"></span></button>
+        <button class="ev-btn" data-event="minor-crash" type="button"><kbd>M</kbd>Minor crash<span class="count"></span></button>
+        <button class="ev-btn" data-event="severe-crash" type="button"><kbd>S</kbd>Severe crash<span class="count"></span></button>
+      </div>
     </div>
 
-    <div style="margin-top: 10px;">
-      <button id="rewind-btn">Rewind 10s</button>
-      <button id="pause-btn">Pause / Resume</button>
-      <button id="forward-btn">Forward 10s</button>
-    </div>
+    <div class="side">
+      <div class="card">
+        {% if source == 'dataset' %}
+          <button id="save-next" class="btn btn--primary" type="button"><span class="k">Enter</span>Save &amp; next video</button>
+          <p id="completion-note">The video stays on its last frame at the end - you can still mark or rewind.</p>
+        {% else %}
+          <button id="save-next" class="btn btn--primary" type="button"><span class="k">Enter</span>Save</button>
+          <p id="completion-note">The video stays on its last frame at the end - you can still mark or rewind.</p>
+        {% endif %}
+      </div>
 
-    <hr>
-
-    <h2>Events</h2>
-    <div style="margin-bottom: 12px;">
-      <button class="event-btn" data-event="takeoff">Take-off</button>
-      <button class="event-btn" data-event="land">Land</button>
-      <button class="event-btn" data-event="minor-crash">Minor Crash</button>
-      <button class="event-btn" data-event="severe-crash">Severe Crash</button>
-    </div>
-
-    <p>Events Marked: <span id="event-count">0</span></p>
-  </div>
-
-  <div id="done-overlay">
-    <h2>All done</h2>
-    <p id="done-message">
-      Clips and event log saved.
-    </p>
-    <div id="done-buttons">
-      {% if source == 'excel' or source == 'dataset' %}
-        <button type="button" onclick="window.location.href='{{ url_for('queue_page') }}'">
-          Return to Queue
+      <div class="card">
+        <h3>Marks (<span id="event-count">0</span>)</h3>
+        <p id="marks-empty">No marks yet. Press a key when the event happens.</p>
+        <ul id="marks"></ul>
+        <button id="undo-btn" class="btn btn--secondary" type="button" style="margin-top:8px;" disabled>
+          <span class="k">Z</span>Undo last mark
         </button>
+      </div>
+
+      {% if source == 'dataset' %}
+      <div class="card">
+        <button id="save-only" class="btn btn--secondary" type="button">Save &amp; back to queue</button>
+        <button id="skip-btn" class="btn btn--ghost" type="button" style="margin-top:8px;">Skip - label later</button>
+      </div>
       {% endif %}
-      <button type="button" onclick="window.location.href='{{ url_for('home_page') }}'">
-        Dashboard
-      </button>
+
+      <div class="card">
+        <p class="keys">
+          <span class="k">T</span> Take-off &nbsp; <span class="k">L</span> Land<br>
+          <span class="k">M</span> Minor &nbsp; <span class="k">S</span> Severe<br>
+          <span class="k">Space</span> Pause<br>
+          <span class="k">←</span><span class="k">→</span> 5s &nbsp; <span class="k">Shift</span>+<span class="k">←</span><span class="k">→</span> 10s<br>
+          <span class="k">Z</span> Undo &nbsp; <span class="k">Enter</span> Save{% if source == 'dataset' %} &amp; next{% endif %}
+        </p>
+      </div>
     </div>
   </div>
 
-  <br>
-  <button type="button" onclick="window.location.href='{{ url_for('home_page') }}'">
-    Dashboard
-  </button>
+  <div id="done-overlay" class="card">
+    <h2>Saved</h2>
+    <p id="done-message">Clips and event log saved.</p>
+    <div class="actions" style="justify-content:center;">
+      {% if source == 'excel' or source == 'dataset' %}
+        <a class="btn btn--primary" href="{{ url_for('queue_page') }}">Return to Queue</a>
+      {% endif %}
+      <a class="btn btn--secondary" href="{{ url_for('home_page') }}">Dashboard</a>
+    </div>
+  </div>
+
+  {% if source == 'dataset' %}
+  <form id="next-form" method="POST" action="{{ url_for('queue_next_item') }}" style="display:none;">
+    <input type="hidden" name="dataset_key" value="{{ item.dataset_key if item else '' }}">
+  </form>
+  <form id="skip-form" method="POST" action="{{ url_for('queue_skip_item') }}" style="display:none;">
+    <input type="hidden" name="dataset_key" value="{{ item.dataset_key if item else '' }}">
+  </form>
+  {% endif %}
 </div>
 
 <script>
-  const eventButtons = document.querySelectorAll('.event-btn');
-  const eventCountSpan = document.getElementById('event-count');
-  const pauseBtn = document.getElementById('pause-btn');
-  const rewindBtn = document.getElementById('rewind-btn');
-  const forwardBtn = document.getElementById('forward-btn');
-  const doneOverlay = document.getElementById('done-overlay');
-  const doneMessage = document.getElementById('done-message');
-
-  const statusPanel = document.getElementById('status-panel');
-  const statusSpinner = document.getElementById('status-spinner');
-  const statusTitle = document.getElementById('status-title');
-  const statusMsg = document.getElementById('status-msg');
-  const statusDetail = document.getElementById('status-detail');
-  const statusActions = document.getElementById('status-actions');
-  const playerArea = document.getElementById('player-area');
-  const videoFeed = document.getElementById('video-feed');
+  const $ = (id) => document.getElementById(id);
+  const eventButtons = document.querySelectorAll('.ev-btn');
+  const statusPanel = $('status-panel');
+  const playerArea = $('player-area');
+  const videoFeed = $('video-feed');
+  const saveNextBtn = $('save-next');
+  const saveOnlyBtn = $('save-only');
+  const skipBtn = $('skip-btn');
+  const undoBtn = $('undo-btn');
+  const completionNote = $('completion-note');
+  const removeBtn = $('remove-unavailable');
+  const marksList = $('marks');
 
   const sessionSource = "{{ source|default('manual') }}";
   const VIDEO_FEED_URL = "{{ url_for('validation_video_feed') }}";
+  const EVENT_LABELS = {
+    'takeoff': 'Take-off', 'land': 'Land',
+    'minor-crash': 'Minor crash', 'severe-crash': 'Severe crash'
+  };
+  const KEY_EVENTS = {t: 'takeoff', l: 'land', m: 'minor-crash', s: 'severe-crash',
+                      '1': 'takeoff', '2': 'land', '3': 'minor-crash', '4': 'severe-crash'};
 
-  let eventCount = 0;
+  let marks = [];
   let lockReleased = false;
   let streamStarted = false;
   let downloadResolved = false;
+  let saving = false;
+  let completed = false;
 
-  const EVENT_LABELS = {
-    'takeoff': 'Take-off',
-    'land': 'Land',
-    'minor-crash': 'Minor Crash',
-    'severe-crash': 'Severe Crash'
-  };
+  // ------------------------------------------------------------------ marks
+  function fmtTime(sec) {
+    sec = Math.max(0, sec || 0);
+    const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  function renderMarks() {
+    marksList.innerHTML = '';
+    marks.forEach(mk => {
+      const li = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = EVENT_LABELS[mk.type] || mk.type;
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = fmtTime(mk.time_sec);
+      li.append(name, t);
+      marksList.appendChild(li);
+    });
+    marksList.scrollTop = marksList.scrollHeight;
+    $('event-count').textContent = marks.length;
+    $('marks-empty').style.display = marks.length ? 'none' : 'block';
+    undoBtn.disabled = !marks.length || saving || completed;
+    eventButtons.forEach(btn => {
+      const n = marks.filter(mk => mk.type === btn.dataset.event).length;
+      btn.querySelector('.count').textContent = n ? '×' + n : '';
+    });
+  }
+
+  function markEvent(ev) {
+    if (!streamStarted || saving || completed) return;
+    const btn = document.querySelector('.ev-btn[data-event="' + ev + '"]');
+    btn.classList.add('flash');
+    setTimeout(() => btn.classList.remove('flash'), 250);
+    fetch('/mark_event', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({event: ev})
+    })
+      .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.success) throw new Error(data.error || "That mark didn't save - try again.");
+        marks.push(data.mark);
+        renderMarks();
+        showToast({type: 'success', message: (EVENT_LABELS[ev] || ev) + ' at ' + fmtTime(data.mark.time_sec), duration: 1500});
+      })
+      .catch(err => showToast({type: 'error', message: err.message || "Lost the connection - that mark didn't save", duration: 5000}));
+  }
+
+  function undoMark() {
+    if (!marks.length || saving || completed) return;
+    fetch('/undo_event', {method: 'POST'})
+      .then(async r => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.success) throw new Error(data.error || 'Could not undo.');
+        marks = marks.filter(mk => mk.index !== data.removed.index);
+        renderMarks();
+        showToast({type: 'info', message: 'Removed ' + (EVENT_LABELS[data.removed.type] || data.removed.type), duration: 1500});
+      })
+      .catch(err => showToast({type: 'error', message: err.message}));
+  }
+
+  eventButtons.forEach(btn => btn.addEventListener('click', () => markEvent(btn.dataset.event)));
+  undoBtn.addEventListener('click', undoMark);
+
+  // ---------------------------------------------------------------- transport
+  function togglePause() {
+    fetch('/toggle_pause', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => { $('pause-label').textContent = d.paused ? 'Play' : 'Pause'; })
+      .catch(err => console.error('toggle_pause error:', err));
+  }
+  function seek(sec) {
+    const url = (sec < 0 ? '/rewind' : '/fast_forward') + '?s=' + Math.abs(sec);
+    fetch(url, {method: 'POST'}).catch(err => console.error('seek error:', err));
+  }
+  $('pause-btn').addEventListener('click', togglePause);
+  document.querySelectorAll('.seek-btn').forEach(b =>
+    b.addEventListener('click', () => seek(Number(b.dataset.sec))));
+
+  // ------------------------------------------------------------------ keyboard
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const arrow = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    if (e.repeat && !arrow) return;
+    if (e.target.closest('input, select, textarea')) return;
+    if (!streamStarted || completed) return;
+    const key = e.key.toLowerCase();
+    if (KEY_EVENTS[key]) { e.preventDefault(); markEvent(KEY_EVENTS[key]); }
+    else if (key === ' ') { e.preventDefault(); togglePause(); }
+    else if (arrow) { e.preventDefault(); seek(arrow * (e.shiftKey ? 10 : 5)); }
+    else if (key === 'z' || key === 'backspace') { e.preventDefault(); undoMark(); }
+    else if (key === 'enter') { e.preventDefault(); saveVideo(sessionSource === 'dataset'); }
+  });
 
   // ---------------------------------------------------------------- download
   function showDownloading() {
     statusPanel.classList.add('is-visible');
     statusPanel.classList.remove('statusPanel--error');
-    statusSpinner.style.display = 'block';
-    statusTitle.textContent = 'Getting the video…';
-    statusMsg.textContent = 'This usually takes under a minute.';
-    statusDetail.style.display = 'none';
-    statusActions.style.display = 'none';
+    $('status-spinner').style.display = 'block';
+    $('status-title').textContent = 'Getting the video…';
+    $('status-msg').textContent = 'This usually takes under a minute.';
+    $('status-detail').style.display = 'none';
+    $('status-actions').style.display = 'none';
   }
 
   function showDownloadFailed(status) {
     downloadResolved = true;
     statusPanel.classList.add('is-visible', 'statusPanel--error');
-    statusSpinner.style.display = 'none';
-    statusTitle.textContent = "This video wouldn't load";
-    statusMsg.textContent = status.error || 'The download failed.';
-
+    $('status-spinner').style.display = 'none';
+    $('status-title').textContent = "This video wouldn't load";
+    $('status-msg').textContent = status.error || 'The download failed.';
     if (status.detail) {
-      statusDetail.style.display = 'block';
-      statusDetail.textContent = status.detail;
+      $('status-detail').style.display = 'block';
+      $('status-detail').textContent = status.detail;
     }
-    statusActions.style.display = 'flex';
+    $('status-actions').style.display = 'flex';
+    if (removeBtn) removeBtn.style.display = status.can_remove_unavailable ? 'inline-flex' : 'none';
     playerArea.classList.add('is-hidden');
 
-    showToast({
-      type: 'error',
-      title: "Video wouldn't load",
-      message: status.error || 'The download failed.',
-      detail: status.detail || '',
-      duration: 0
-    });
+    // A failed download is not a labeled row - put it back in the queue.
+    if (!lockReleased) {
+      lockReleased = true;
+      fetch('/validation_release_lock', {method: 'POST'}).catch(() => {});
+    }
+  }
+
+  // The server restarted (or the session was replaced in another tab).
+  function showSessionGone() {
+    downloadResolved = true;
+    statusPanel.classList.add('is-visible', 'statusPanel--error');
+    $('status-spinner').style.display = 'none';
+    $('status-title').textContent = 'This video is no longer open';
+    $('status-msg').textContent = 'The server was restarted, or you opened another video in a different tab. Go back to the queue and click Resume to label this video again from the start.';
+    $('status-actions').style.display = 'flex';
+    playerArea.classList.add('is-hidden');
   }
 
   function startStream(status) {
     downloadResolved = true;
     statusPanel.classList.remove('is-visible');
     playerArea.classList.remove('is-hidden');
+    if (streamStarted) return;
+    streamStarted = true;
+    // Only attach the MJPEG source once we know a video actually exists,
+    // otherwise the browser sits on a blank frame forever.
+    videoFeed.src = VIDEO_FEED_URL;
 
-    if (!streamStarted) {
-      streamStarted = true;
-      // Only attach the MJPEG source once we know a video actually exists,
-      // otherwise the browser sits on a blank frame forever.
-      videoFeed.src = VIDEO_FEED_URL;
+    // Restore marks after a page reload.
+    fetch('/validation_events').then(r => r.json())
+      .then(d => { marks = d.events || []; renderMarks(); })
+      .catch(() => {});
 
-      showToast({
-        type: 'success',
-        message: status.video_name
-          ? ('Playing ' + status.video_name)
-          : 'Video is playing'
-      });
-
-      if (status.ffmpeg === false) {
-        showToast({
-          type: 'warning',
-          title: 'No ffmpeg on this machine',
-          message: 'Videos will download at reduced quality.',
-          duration: 9000
-        });
-      }
+    if (status.ffmpeg === false) {
+      showToast({type: 'warning', title: 'No ffmpeg on this machine',
+                 message: 'Videos will download at reduced quality.', duration: 9000});
     }
   }
+
+  // The MJPEG connection can drop (sleep, network blip). Reconnect: the server
+  // resumes from the same position instead of restarting the video.
+  videoFeed.addEventListener('error', () => {
+    if (!streamStarted || saving || completed) return;
+    setTimeout(() => { if (!saving && !completed) videoFeed.src = VIDEO_FEED_URL + '?r=' + Date.now(); }, 1000);
+  });
 
   function pollDownload() {
     fetch('/validation_status')
       .then(r => r.json())
       .then(status => {
-        if (status.state === 'failed') {
-          showDownloadFailed(status);
-          return;
-        }
-
-        if (status.state === 'ready' || status.video_ready) {
-          startStream(status);
-          return;
-        }
-
-        if (status.state === 'downloading') {
-          showDownloading();
-        }
-
-        setTimeout(pollDownload, 1500);
+        if (status.state === 'failed') { showDownloadFailed(status); return; }
+        if (status.state === 'idle') { showSessionGone(); return; }
+        if (status.state === 'ready' || status.video_ready) { startStream(status); return; }
+        showDownloading();
+        setTimeout(pollDownload, 1000);
       })
       .catch(err => {
         console.error('validation_status error:', err);
@@ -222,131 +382,117 @@
       });
   }
 
-  // ------------------------------------------------------------------ events
-  eventButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const ev = btn.getAttribute('data-event');
-      fetch('/mark_event', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({event: ev})
-      })
+  // -------------------------------------------------------------------- save
+  function setSaving(on, note) {
+    saving = on;
+    [saveNextBtn, saveOnlyBtn, skipBtn].forEach(b => { if (b) b.disabled = on; });
+    eventButtons.forEach(b => b.disabled = on);
+    undoBtn.disabled = on || !marks.length;
+    if (note) completionNote.textContent = note;
+  }
+
+  function goNext() {
+    const form = $('next-form');
+    if (form) form.submit();
+  }
+
+  function showSaved() {
+    completed = true;
+    saving = false;
+    playerArea.classList.add('is-hidden');
+    videoFeed.removeAttribute('src');
+    $('done-overlay').style.display = 'block';
+    $('done-message').textContent = sessionSource === 'dataset'
+      ? 'Saved to the labeling Excel and marked as Labeled in the queue.'
+      : 'Clips and event log saved.';
+  }
+
+  function waitForSave(thenNext) {
+    fetch('/validation_status')
       .then(r => r.json())
-      .then(data => {
-        if (data.success) {
-          eventCount += 1;
-          eventCountSpan.textContent = eventCount;
-          showToast({
-            type: 'success',
-            message: (EVENT_LABELS[ev] || ev) + ' marked',
-            duration: 2500
-          });
-        } else {
-          showToast({
-            type: 'error',
-            message: "That didn't register - try again"
-          });
+      .then(status => {
+        if (status.session_status !== 'final') {
+          if (status.session_status === 'failed' || status.session_status === 'cancelled') {
+            throw new Error('The video session could not be saved.');
+          }
+          setTimeout(() => waitForSave(thenNext), 700);
+          return;
         }
-      })
-      .catch(err => {
-        console.error('mark_event error:', err);
-        showToast({
-          type: 'error',
-          message: "Lost the connection - that mark didn't save"
-        });
-      });
-    });
-  });
-
-  pauseBtn.addEventListener('click', () => {
-    fetch('/toggle_pause', {method: 'POST'})
-      .then(r => r.json())
-      .then(d => showToast({
-        type: 'info',
-        message: d.paused ? 'Paused' : 'Playing',
-        duration: 1800
-      }))
-      .catch(err => console.error('toggle_pause error:', err));
-  });
-
-  rewindBtn.addEventListener('click', () => {
-    fetch('/rewind', {method: 'POST'})
-      .then(() => showToast({type: 'info', message: 'Back 10s', duration: 1500}))
-      .catch(err => console.error('rewind error:', err));
-  });
-
-  forwardBtn.addEventListener('click', () => {
-    fetch('/fast_forward', {method: 'POST'})
-      .then(() => showToast({type: 'info', message: 'Ahead 10s', duration: 1500}))
-      .catch(err => console.error('fast_forward error:', err));
-  });
-
-  // ------------------------------------------------------------- done polling
-  function pollStatus() {
-    fetch('/check_status')
-      .then(r => r.text())
-      .then(txt => {
-        if (txt.trim() === 'done') {
-
-          if (!lockReleased) {
-            lockReleased = true;
-            fetch('/validation_release_lock', { method: 'POST' })
-              .then(r => r.json())
-              .then(d => {
-                if (d.released_as === 'not_labeled') {
-                  showToast({
-                    type: 'info',
-                    title: 'Put back in the queue',
-                    message: 'Nothing was saved for this row.',
-                    duration: 9000
-                  });
-                }
-              })
-              .catch(err => console.error('validation_release_lock error:', err));
-          }
-
-          // A failed download also flips the done flag. Only claim the session
-          // completed once we know a video actually played.
-          if (!streamStarted) {
-            if (!downloadResolved) {
-              // Download outcome not known yet - check again shortly.
-              setTimeout(pollStatus, 1500);
-            }
-            return;
-          }
-
-          {
-            doneOverlay.style.display = 'block';
-
-            if (sessionSource === 'excel' || sessionSource === 'dataset') {
-              doneMessage.textContent =
-                'Saved. This row is marked as labeled.';
+        return fetch('/validation_release_lock', {method: 'POST'})
+          .then(async r => {
+            const data = await r.json();
+            if (!r.ok || !data.ok) throw new Error(data.error || 'Could not update the labeling Excel.');
+            if (thenNext) {
+              completed = true;
+              completionNote.textContent = 'Saved. Opening the next video…';
+              showToast({type: 'success', message: 'Saved - loading the next video', duration: 2500});
+              goNext();
+            } else if (sessionSource === 'dataset') {
+              completed = true;
+              window.location.href = "{{ url_for('queue_page') }}";
             } else {
-              doneMessage.textContent =
-                'Clips and event log saved.';
+              showSaved();
             }
-
-            showToast({
-              type: 'success',
-              title: 'All done',
-              message: 'Clips and event log saved.',
-              duration: 8000
-            });
-          }
-
-        } else {
-          setTimeout(pollStatus, 2000);
-        }
+          });
       })
       .catch(err => {
-        console.error('check_status error:', err);
-        setTimeout(pollStatus, 4000);
+        setSaving(false, err.message);
+        saveNextBtn.textContent = 'Retry saving';
+        showToast({type: 'error', message: err.message});
       });
+  }
+
+  function saveVideo(thenNext) {
+    if (saving || completed || !streamStarted) return;
+    if (!marks.length && !confirm('No events marked. Save this video with no events?')) return;
+    setSaving(true, 'Saving clips…');
+    fetch('/validation_finish', {method: 'POST'})
+      .then(async r => {
+        const data = await r.json();
+        if (!r.ok || !data.ok) throw new Error(data.error || 'Could not finish labeling.');
+        videoFeed.removeAttribute('src');
+        waitForSave(thenNext);
+      })
+      .catch(err => {
+        setSaving(false, err.message);
+        showToast({type: 'error', message: err.message});
+      });
+  }
+
+  window.skipVideo = function () {
+    const form = $('skip-form');
+    if (!form || completed) return;
+    if (marks.length && !confirm('Skip this video? Its ' + marks.length + ' mark(s) will not be saved.')) return;
+    completed = true;
+    videoFeed.removeAttribute('src');
+    form.submit();
+  };
+
+  saveNextBtn.addEventListener('click', () => saveVideo(sessionSource === 'dataset'));
+  if (saveOnlyBtn) saveOnlyBtn.addEventListener('click', () => saveVideo(false));
+  if (skipBtn) skipBtn.addEventListener('click', window.skipVideo);
+
+  if (removeBtn) {
+    removeBtn.addEventListener('click', () => {
+      if (!confirm('Remove this video from the queue and the labeling Excel?\n\nOnly do this if the link is broken - the row is deleted for the whole team.')) return;
+      removeBtn.disabled = true;
+      removeBtn.textContent = 'Removing…';
+      fetch('/validation_remove_unavailable', {method: 'POST'})
+        .then(async r => {
+          const data = await r.json();
+          if (!r.ok || !data.ok) throw new Error(data.error || 'Could not remove this video.');
+          window.location.href = data.queue_url;
+        })
+        .catch(err => {
+          removeBtn.disabled = false;
+          removeBtn.textContent = 'Remove this video from the queue';
+          showToast({type: 'error', message: err.message});
+        });
+    });
   }
 
   showDownloading();
   pollDownload();
-  pollStatus();
 </script>
 </body>
 </html>

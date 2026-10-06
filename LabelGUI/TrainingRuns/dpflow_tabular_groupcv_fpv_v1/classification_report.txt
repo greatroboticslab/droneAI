@@ -1,0 +1,12 @@
+Out-of-fold predictions, random_forest, 5-fold grouped by video_id
+
+              precision    recall  f1-score   support
+
+        land       0.33      0.20      0.25        10
+ minor-crash       0.41      0.39      0.40        18
+severe-crash       0.60      0.64      0.62        14
+     takeoff       0.64      0.72      0.68        29
+
+    accuracy                           0.55        71
+   macro avg       0.50      0.49      0.49        71
+weighted avg       0.53      0.55      0.54        71

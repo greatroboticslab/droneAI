@@ -1,0 +1,10 @@
+{
+  "script": "extract_dpflow_drone_features.py",
+  "purpose": "Extract DPFlow optical-flow features from DroneAI labeled clips.",
+  "model": "dpflow",
+  "checkpoint": "things",
+  "device": "mps",
+  "resize_width": 640,
+  "fps_fallback": 10.0,
+  "notes": "This run should be preserved for experiment tracking and paper writing."
+}

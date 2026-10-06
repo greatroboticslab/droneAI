@@ -1,0 +1,5 @@
+,land,minor-crash,severe-crash,takeoff
+land,2,2,2,4
+minor-crash,1,7,3,7
+severe-crash,1,3,9,1
+takeoff,2,5,1,21

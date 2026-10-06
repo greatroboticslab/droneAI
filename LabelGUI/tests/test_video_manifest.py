@@ -11,7 +11,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from db.db_store import DBStore  # noqa: E402
-from video_manifest import COLUMNS, build_video_manifest, write_video_manifest  # noqa: E402
+from video_manifest import (  # noqa: E402
+    COLUMNS,
+    build_session_map,
+    build_video_manifest,
+    session_folder_name,
+    write_video_manifest,
+)
 
 
 def _item(key, row, person, link, **extra):
@@ -115,6 +121,28 @@ class VideoManifestTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             conn.execute("DELETE FROM dataset_items")
         conn.close()
+
+    def test_session_map_groups_relabeled_video(self):
+        # The same video labeled twice: folders "Alice FPV 1" and "Alice_FPV_11".
+        for sid, folder in [("s-a", "LabelGUI/ValidationResults/Alice FPV 1"),
+                            ("s-b", "LabelGUI\\ValidationResults\\Alice_FPV_11")]:
+            self.db.upsert_validation_session(sid=sid, youtube_link="https://youtu.be/AAAAAAAAAAA",
+                                              folder_path=folder, status="final")
+        self.db.upsert_validation_session(sid="s-c", youtube_link="clip.mp4",
+                                          folder_path="LabelGUI/ValidationResults/Carol", status="final")
+        rows = {r["session_name"]: r for r in build_session_map(self.db_path)}
+        self.assertEqual(set(rows), {"Alice_FPV_1", "Alice_FPV_11", "Carol"})
+        self.assertEqual(rows["Alice_FPV_1"]["video_id"], "AAAAAAAAAAA")
+        self.assertEqual(rows["Alice_FPV_11"]["video_id"], "AAAAAAAAAAA")
+        self.assertEqual(rows["Alice_FPV_1"]["view_type"], "FPV")
+        self.assertEqual(rows["Carol"]["video_id"], "file-123456789abc")
+        self.assertEqual(rows["Carol"]["view_type"], "Third-person")
+        self.assertEqual(rows["Alice_FPV_11"]["folder_path"], "LabelGUI/ValidationResults/Alice_FPV_11")
+
+    def test_session_folder_name_matches_frame_dataset_rule(self):
+        self.assertEqual(session_folder_name("LabelGUI/ValidationResults/4 18 2024(First)1"), "4_18_2024(First)1")
+        self.assertEqual(session_folder_name("a/b/x: y?"), "x_y")
+        self.assertEqual(session_folder_name(""), "unnamed")
 
     def test_csv_has_all_columns(self):
         out = Path(self.tmp.name) / "sub" / "video_manifest.csv"

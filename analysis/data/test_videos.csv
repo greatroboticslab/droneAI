@@ -1,0 +1,14 @@
+video_id,view_type,source,person_name,n_severe_crash,n_land,n_minor_crash,n_takeoff,reason
+8vEFkgpMTfc,Third-person,Real,Shontal Botros,0,0,1,0,fill
+EGfjZdAfLQs,FPV,Real,Cristian Ramirez,0,0,1,1,FPV fill
+HH_ZcYrfyyE,Third-person,Real,Holly Craddock,0,0,0,1,fill
+KacdYa_j2hQ,FPV,Real,Cristian Ramirez,0,1,1,1,has land
+ONaVhjNEOJU,FPV,Real,Cristian Ramirez,0,0,0,1,FPV fill
+TzlKilT_YVw,FPV,Real,Samuel Dunn,1,0,0,1,has severe-crash
+UjrQO5K8b8I,FPV,Real,Kenneth Evans,1,0,0,1,FPV fill
+Z6QxWCXLZpw,FPV,Real,Samuel Dunn,0,0,3,2,FPV fill
+k8xM2VsClXg,Third-person,Real,Shontal Botros,0,0,0,1,fill
+mYha8rJhn3k,FPV,Real,Garrett Hortert,0,0,0,1,FPV fill
+neGwr2JPSy0,FPV,Simulation,Abigail Lee,3,4,0,4,FPV fill
+uXFr3RIGRzE,Third-person,Real,Joshua Gensmer,0,0,1,0,fill
+yNmWmmiiD0E,FPV,Real,Hunter Hill,1,0,0,0,FPV fill

@@ -1,378 +1,461 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Optical Flow Analysis - DroneAI</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background: #f4f6f8;
-            margin: 0;
-            padding: 0;
-            color: #1f2937;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Optical-flow model · DroneAI</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    :root {
+      --accent: #5b8def;
+      --accent-soft: rgba(91, 141, 239, 0.16);
+      --track: rgba(255, 255, 255, 0.07);
+      --warn: #e0a84f;
+    }
+    main.container { max-width: 1180px; padding-bottom: 64px; }
+    .num { font-variant-numeric: tabular-nums; }
+    h1, h2 { text-wrap: balance; }
+    section { margin-top: 40px; }
+    section h2 { font-size: 1.05rem; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+    section .lede { color: var(--muted); margin: 0 0 16px; font-size: .92rem; max-width: 68ch; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px;
+             min-width: 0; overflow-x: auto; }
 
-        .page {
-            max-width: 1300px;
-            margin: 0 auto;
-            padding: 28px;
-        }
+    /* Header */
+    .run-head { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between; margin-top: 28px; }
+    .run-head h1 { margin: 0; font-size: 1.7rem; font-weight: 650; letter-spacing: -0.02em; }
+    .run-head .meta { color: var(--muted); font-size: .9rem; margin-top: 6px; }
+    .run-pick { display: flex; gap: 8px; align-items: center; }
+    .run-pick select { width: auto; min-width: 260px; }
+    .notice { margin-top: 18px; padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(224,168,79,.45);
+              background: rgba(224,168,79,.08); font-size: .92rem; }
 
-        .topbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-        }
+    /* Score */
+    .score { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 28px; align-items: center; margin-top: 24px; }
+    .score__big { font-size: 3.4rem; font-weight: 700; letter-spacing: -0.04em; line-height: 1; }
+    .score__pm { color: var(--muted); font-size: .95rem; margin-top: 8px; }
+    .score__f1 { margin-top: 14px; font-size: .92rem; }
+    .scale { position: relative; height: 92px; }
+    .scale__track { position: absolute; left: 0; right: 0; top: 40px; height: 10px; border-radius: 5px; background: var(--track); }
+    .scale__band { position: absolute; top: 40px; height: 10px; border-radius: 5px; background: var(--accent-soft); }
+    .scale__fill { position: absolute; left: 0; top: 40px; height: 10px; border-radius: 5px; background: var(--accent); }
+    .mark { position: absolute; top: 0; transform: translateX(-50%); text-align: center; font-size: .78rem; color: var(--muted); white-space: nowrap; }
+    .mark::after { content: ""; display: block; width: 1px; height: 22px; margin: 4px auto 0; background: rgba(255,255,255,.35); }
+    .mark--below { top: 54px; }
+    .mark--below::after { display: none; }
+    .mark--below::before { content: ""; display: block; width: 1px; height: 10px; margin: 0 auto 4px; background: rgba(255,255,255,.35); }
+    .mark b { color: var(--text); font-weight: 600; }
+    .scale__axis { position: absolute; top: 76px; left: 0; right: 0; display: flex; justify-content: space-between; font-size: .72rem; color: var(--muted); }
+    .verdict { margin: 18px 0 0; font-size: .95rem; max-width: 70ch; }
 
-        .topbar h1 {
-            margin: 0;
-            font-size: 30px;
-        }
+    /* Tables */
+    table.t { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    table.t th { text-align: left; font-weight: 500; color: var(--muted); font-size: .8rem; padding: 0 12px 10px 0; border-bottom: 1px solid var(--border); }
+    table.t td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.t tr:last-child td { border-bottom: 0; }
+    table.t tr:hover td { background: transparent; }
+    .r, table.t th.r { text-align: right; }
+    .bar { position: relative; height: 8px; border-radius: 4px; background: var(--track); min-width: 120px; }
+    .bar > span { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--accent); }
+    .bar-cell { display: grid; grid-template-columns: 1fr 76px; gap: 12px; align-items: center; }
+    .bar-cell small { color: var(--muted); font-size: .82rem; text-align: right; }
 
-        .topbar a {
-            text-decoration: none;
-            background: #111827;
-            color: white;
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 14px;
-        }
+    .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .two > div, .facts > div { min-width: 0; }
 
-        .subtitle {
-            color: #4b5563;
-            margin-top: 8px;
-            line-height: 1.5;
-        }
+    /* Confusion matrix */
+    .cm { display: grid; gap: 4px; font-size: .85rem; }
+    .cm__h { color: var(--muted); font-size: .76rem; text-align: center; padding-bottom: 4px; }
+    .cm__row { color: var(--muted); font-size: .8rem; display: flex; align-items: center; }
+    .cm__c { border-radius: 6px; text-align: center; padding: 12px 0; }
+    .cm__c.is-diag { outline: 1px solid rgba(255,255,255,.35); font-weight: 650; }
+    .cm__axis { color: var(--muted); font-size: .76rem; margin-top: 10px; }
 
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
-            margin: 24px 0;
-        }
+    /* Folds */
+    .folds { display: grid; gap: 10px; }
+    .fold { display: grid; grid-template-columns: 56px minmax(0, 1fr) 130px; gap: 12px; align-items: center; font-size: .9rem; }
+    .fold small { color: var(--muted); }
 
-        .card {
-            background: white;
-            border-radius: 14px;
-            padding: 18px;
-            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
-        }
+    /* Facts */
+    .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+    .facts code { overflow-wrap: anywhere; }
+    .facts h3 { margin: 0 0 10px; font-size: .9rem; font-weight: 600; }
+    dl.kv { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: .88rem; }
+    dl.kv dt { color: var(--muted); }
+    dl.kv dd { margin: 0; text-align: right; }
+    pre.cmd { margin: 16px 0 0; padding: 14px 16px; border-radius: 10px; background: rgba(0,0,0,.35); border: 1px solid var(--border);
+              font: .82rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-x: auto; white-space: pre; }
+    .cmd-label { margin-top: 18px; font-size: .82rem; color: var(--muted); }
 
-        .card-title {
-            color: #6b7280;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: var(--muted); }
+    .tag { display: inline-block; font-size: .74rem; padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border); color: var(--muted); }
+    .tag--warn { border-color: rgba(224,168,79,.5); color: var(--warn); }
+    .tag--on { border-color: rgba(91,141,239,.5); color: var(--accent); }
+    a.plain { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+    a.plain:hover { border-color: var(--accent); }
 
-        .card-value {
-            font-size: 28px;
-            font-weight: bold;
-        }
+    .empty { margin-top: 40px; max-width: 70ch; }
+    .empty ol { line-height: 1.9; }
 
-        .section {
-            background: white;
-            border-radius: 14px;
-            padding: 22px;
-            margin-bottom: 24px;
-            box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
-        }
-
-        .section h2 {
-            margin-top: 0;
-            font-size: 22px;
-        }
-
-        .chart-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 18px;
-        }
-
-        .chart {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 16px;
-            background: #fafafa;
-        }
-
-        .chart h3 {
-            margin-top: 0;
-            font-size: 17px;
-        }
-
-        .bar-row {
-            display: grid;
-            grid-template-columns: 110px 1fr 70px;
-            gap: 10px;
-            align-items: center;
-            margin: 10px 0;
-        }
-
-        .bar-label {
-            font-size: 14px;
-            color: #374151;
-        }
-
-        .bar-bg {
-            height: 18px;
-            background: #e5e7eb;
-            border-radius: 20px;
-            overflow: hidden;
-        }
-
-        .bar-fill {
-            height: 100%;
-            background: #2563eb;
-            border-radius: 20px;
-        }
-
-        .bar-value {
-            text-align: right;
-            font-size: 13px;
-            color: #374151;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-
-        th, td {
-            padding: 10px;
-            border-bottom: 1px solid #e5e7eb;
-            text-align: left;
-        }
-
-        th {
-            background: #f9fafb;
-            color: #374151;
-        }
-
-        .image-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
-        }
-
-        .debug-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            overflow: hidden;
-            background: #fafafa;
-        }
-
-        .debug-card img {
-            width: 100%;
-            display: block;
-        }
-
-        .debug-caption {
-            padding: 10px;
-            font-size: 12px;
-            color: #4b5563;
-            word-break: break-word;
-        }
-
-        .legend {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-            margin-top: 10px;
-        }
-
-        .legend-item {
-            background: #f9fafb;
-            border-radius: 10px;
-            padding: 10px;
-            font-size: 13px;
-        }
-
-        .error {
-            background: #fee2e2;
-            color: #991b1b;
-            padding: 16px;
-            border-radius: 10px;
-        }
-
-        .note {
-            background: #eff6ff;
-            color: #1e3a8a;
-            padding: 14px;
-            border-radius: 10px;
-            line-height: 1.5;
-        }
-
-        @media (max-width: 900px) {
-            .cards {
-                grid-template-columns: repeat(2, 1fr);
-            }
-
-            .chart-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .image-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .legend {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    @media (max-width: 900px) {
+      .score, .two, .facts { grid-template-columns: minmax(0, 1fr); }
+      .run-pick, .run-pick select { min-width: 0; width: 100%; }
+      .panel { padding: 16px; }
+      .bar { min-width: 56px; }
+      .bar-cell { grid-template-columns: minmax(0, 1fr) 64px; }
+      .fold { grid-template-columns: 52px minmax(0, 1fr) 112px; }
+      .scale .mark { font-size: .7rem; }
+      .hide-sm { display: none; }
+    }
+  </style>
 </head>
 <body>
-<div class="page">
-
-    <div class="topbar">
-        <div>
-            <h1>Optical Flow Analysis</h1>
-            <div class="subtitle">
-                Visual summary of drone-region optical flow, detected-center motion, velocity-style features, and debug outputs.
-            </div>
-        </div>
-        <div>
-            <a href="/optical_flow/clip">Clip Explorer</a>
-            <a href="/">Back to Dashboard</a>
-        </div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand__title">DroneAI</div>
+      <div class="brand__subtitle">Optical-flow model</div>
     </div>
+    <nav class="nav-actions">
+      <a class="btn btn--ghost" href="{{ url_for('home_page') }}">Dashboard</a>
+      <a class="btn btn--ghost" href="{{ url_for('queue_page') }}">Queue</a>
+    </nav>
+  </div>
+</header>
 
-    {% if not data.available %}
-        <div class="error">
-            {{ data.message }}
-        </div>
-    {% else %}
+<main class="container">
+{% set run = data.run %}
+{% if not run %}
+  <div class="empty">
+    <h1>No trained model yet</h1>
+    <p class="muted">Training results appear here after a run of <code>train_dpflow_tabular_models.py</code>. The full steps for Mac and Windows/Linux are in <code>docs/OPTICAL_FLOW_GUIDE.md</code>. In short:</p>
+    <ol>
+      <li>Label videos in the queue.</li>
+      <li>Cut frames from the labeled clips: <code>python LabelGUI/extract_labeled_frames.py</code></li>
+      <li>Compute optical flow: <code>python LabelGUI/extract_dpflow_drone_features.py --device cuda</code> (or <code>mps</code> on a Mac)</li>
+      <li>Train: <code>python LabelGUI/train_dpflow_tabular_models.py --view-type FPV</code></li>
+    </ol>
+  </div>
+{% else %}
 
-        <div class="cards">
-            {% for card in data.cards %}
-                <div class="card">
-                    <div class="card-title">{{ card.title }}</div>
-                    <div class="card-value">{{ card.value }}</div>
-                </div>
-            {% endfor %}
-        </div>
-
-        <div class="section">
-            <h2>What This Shows</h2>
-            <div class="note">
-                This page uses the saved optical-flow results from <b>flow_v1</b>.
-                The speeds shown here are normalized image-motion values, not real-world meters per second.
-                They are useful for comparing motion patterns between takeoff, landing, minor crash, and severe crash clips.
-            </div>
-
-            <div class="legend">
-                <div class="legend-item"><b>ROI Available Rate:</b> how often a usable drone-focused region was available.</div>
-                <div class="legend-item"><b>Both-Detected Rate:</b> how often the drone was detected in both consecutive frames.</div>
-                <div class="legend-item"><b>Detected-Center Speed:</b> movement of the detected drone center over time.</div>
-                <div class="legend-item"><b>Optical-Flow Speed:</b> pixel motion inside the drone-focused region.</div>
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Class Motion Summary</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Label</th>
-                        <th>Clips</th>
-                        <th>ROI Rate</th>
-                        <th>Both-Detected Rate</th>
-                        <th>Avg Flow Speed</th>
-                        <th>Avg Detected Speed</th>
-                        <th>Peak Detected Speed</th>
-                        <th>Avg Acceleration</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in data.class_stats %}
-                        <tr>
-                            <td>{{ "%.2f"|format((row.roi_available_rate or 0) * 100) }}%</td>
-                            <td>{{ "%.2f"|format((row.both_detected_rate or 0) * 100) }}%</td>
-                            <td>{{ "%.4f"|format(row.avg_flow_speed or 0) }}</td>
-                            <td>{{ "%.4f"|format(row.avg_detected_speed or 0) }}</td>
-                            <td>{{ "%.4f"|format(row.peak_detected_speed or 0) }}</td>
-                            <td>{{ "%.4f"|format(row.avg_detected_accel or 0) }}</td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <div class="section">
-            <h2>Motion Visualizations by Class</h2>
-            <div class="chart-grid">
-                {% for chart in data.charts %}
-                    <div class="chart">
-                        <h3>{{ chart.title }}</h3>
-
-                        {% for bar in chart.bars %}
-                            <div class="bar-row">
-                                <div class="bar-label">{{ bar.label }}</div>
-                                <div class="bar-bg">
-                                    <div class="bar-fill" style="width: {{ bar.width }}%;"></div>
-                                </div>
-                                <div class="bar-value">{{ bar.display }}</div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endfor %}
-            </div>
-        </div>
-
-        <div class="section">
-            <h2>Optical Flow Debug Examples</h2>
-            <p class="subtitle">
-                These images show the drone detection boxes, optical-flow region, and detected drone movement arrow.
-                This is the first visual check that the optical-flow pipeline is focusing on the right area.
-            </p>
-
-            <div class="legend">
-                <div class="legend-item"><b>Green box:</b> drone in current frame</div>
-                <div class="legend-item"><b>Yellow/orange box:</b> drone in next frame</div>
-                <div class="legend-item"><b>Blue box:</b> optical-flow region</div>
-                <div class="legend-item"><b>Red arrow:</b> detected center movement</div>
-            </div>
-
-            <br>
-
-            {% if data.debug_images %}
-                <div class="image-grid">
-                    {% for img in data.debug_images %}
-                        <div class="debug-card">
-                            <img src="{{ url_for('optical_flow_debug_image', filename=img) }}" alt="{{ img }}">
-                            <div class="debug-caption">{{ img }}</div>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="error">
-                    No debug images found. Expected folder: {{ data.files.debug_dir }}
-                </div>
-            {% endif %}
-        </div>
-
-        <div class="section">
-            <h2>Source Files</h2>
-            <table>
-                <tbody>
-                    <tr>
-                        <th>Run Summary</th>
-                        <td>{{ data.files.run_summary }}</td>
-                    </tr>
-                    <tr>
-                        <th>Clip Summary</th>
-                        <td>{{ data.files.clip_summary }}</td>
-                    </tr>
-                    <tr>
-                        <th>Debug Images</th>
-                        <td>{{ data.files.debug_dir }}</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-
+  <div class="run-head">
+    <div>
+      <h1>How well the model recognises events</h1>
+      <div class="meta num">
+        {{ run.name }}{% if run.date_label %} · trained {{ run.date_label }}{% endif %}
+        · {{ run.view if run.view != 'all' else 'all views' }}
+        · {% if run.snapshot %}data {{ run.snapshot.id }} <span class="mono">{{ run.snapshot.fingerprint[:8] }}</span>{% else %}<span class="tag tag--warn">live data, not a snapshot</span>{% endif %}
+      </div>
+    </div>
+    {% if data.runs|length > 1 %}
+    <form class="run-pick" method="get">
+      <label for="run" class="muted" style="margin:0;">Run</label>
+      <select id="run" name="run" onchange="this.form.submit()">
+        {% for r in data.runs %}
+          <option value="{{ r.name }}" {% if r.name == run.name %}selected{% endif %}>
+            {{ r.name }} · {{ '%.1f'|format(r.accuracy * 100) }}%{% if not r.honest %} (not comparable){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </form>
     {% endif %}
-</div>
+  </div>
+
+  {% if not run.honest %}
+  <div class="notice">
+    This run used a {{ run.split }}: clips from the same video were in both training and testing,
+    so the score is higher than the model really is. Compare only runs marked “grouped by video”.
+  </div>
+  {% endif %}
+
+  <!-- Score -->
+  <div class="score panel">
+    <div>
+      <div class="score__big num">{{ '%.1f'|format(run.accuracy * 100) }}%</div>
+      <div class="score__pm num">
+        {% if run.accuracy_std is not none %}± {{ '%.1f'|format(run.accuracy_std * 100) }} points across {{ run.folds|length }} folds{% else %}{{ run.split }}{% endif %}
+      </div>
+      <div class="score__f1 num">
+        Balanced score (macro F1) <b>{{ '%.2f'|format(run.macro_f1) }}</b>
+        <div class="muted" style="font-size:.82rem; margin-top:3px;">Counts every event type equally, so rare events matter.</div>
+      </div>
+    </div>
+    <div>
+      {% set acc = run.accuracy * 100 %}
+      {% set sd = (run.accuracy_std or 0) * 100 %}
+      <div class="scale" role="img" aria-label="Accuracy {{ '%.1f'|format(acc) }} percent compared with guessing and the target">
+        <div class="scale__track"></div>
+        <div class="scale__band" style="left: {{ [acc - sd, 0]|max }}%; width: {{ [acc + sd, 100]|min - [acc - sd, 0]|max }}%;"></div>
+        <div class="scale__fill" style="width: {{ acc }}%;"></div>
+        {% if run.chance %}<div class="mark mark--below num hide-sm" style="left: {{ run.chance * 100 }}%;">Random guess {{ '%.0f'|format(run.chance * 100) }}%</div>{% endif %}
+        {% if run.majority %}<div class="mark num" style="left: {{ run.majority * 100 }}%;">Always “{{ run.majority_label }}” {{ '%.1f'|format(run.majority * 100) }}%</div>{% endif %}
+        <div class="mark mark--below num" style="left: {{ acc }}%;"><b>This model {{ '%.1f'|format(acc) }}%</b></div>
+        <div class="mark num" style="left: {{ data.accuracy_target * 100 }}%;">Target {{ '%.0f'|format(data.accuracy_target * 100) }}%</div>
+        <div class="scale__axis num"><span>0%</span><span>100%</span></div>
+      </div>
+      <p class="verdict">
+        {% if run.majority %}
+          {% set gain = (run.accuracy - run.majority) * 100 %}
+          {% if gain > 0 %}
+            {{ '%.1f'|format(gain) }} points better than always guessing “{{ run.majority_label }}”,
+          {% else %}
+            No better than always guessing “{{ run.majority_label }}”,
+          {% endif %}
+        {% endif %}
+        {% set gap = (data.accuracy_target - run.accuracy) * 100 %}
+        {% if gap > 0 %}{{ '%.1f'|format(gap) }} points short of the target.{% else %}above the target.{% endif %}
+        {% if run.honest %}Each score comes from videos the model never saw while training.{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <!-- Per event -->
+  {% if run.per_class %}
+  <section>
+    <h2>Per event</h2>
+    <p class="lede">“Found” is how many clips of that event the model named correctly. “Right when it says so” is how often it was correct when it predicted that event.</p>
+    <div class="panel">
+      <table class="t num">
+        <thead><tr><th>Event</th><th class="r">Clips</th><th style="width:40%;">Found</th><th class="r">Right when it says so</th><th class="r hide-sm">F1</th></tr></thead>
+        <tbody>
+          {% for c in run.per_class %}
+          <tr>
+            <td>{{ c.name }}</td>
+            <td class="r">{{ c.clips }}</td>
+            <td><div class="bar-cell"><div class="bar"><span style="width: {{ c.recall * 100 }}%;"></span></div><small>{{ c.found }} of {{ c.clips }}</small></div></td>
+            <td class="r">{{ '%.0f'|format(c.precision * 100) }}%</td>
+            <td class="r hide-sm">{{ '%.2f'|format(c.f1) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Confusion + folds -->
+  {% if run.confusion or run.folds %}
+  <section class="two">
+    {% if run.confusion %}
+    <div>
+      <h2>What it mixes up</h2>
+      <p class="lede">Each row is the real event; each column is what the model said. The outlined squares are correct answers.</p>
+      <div class="panel">
+        <div class="cm num" style="grid-template-columns: 96px repeat({{ run.confusion_labels|length }}, 1fr);">
+          <div></div>
+          {% for l in run.confusion_labels %}<div class="cm__h">{{ l }}</div>{% endfor %}
+          {% for row in run.confusion %}
+            <div class="cm__row">{{ row.label }}</div>
+            {% for c in row.cells %}
+              <div class="cm__c {% if c.diagonal %}is-diag{% endif %}"
+                   style="background: rgba(91,141,239,{{ '%.2f'|format(0.06 + c.share * 0.7) }});"
+                   title="{{ row.label }} called {{ run.confusion_labels[loop.index0] }}: {{ c.n }} of {{ row.total }}">{{ c.n }}</div>
+            {% endfor %}
+          {% endfor %}
+        </div>
+        <div class="cm__axis">Rows: real event · Columns: model’s answer</div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if run.folds %}
+    <div>
+      <h2>Score on each fold</h2>
+      <p class="lede">The videos are split into {{ run.folds|length }} groups; each group is tested once by a model trained on the others. A wide spread means more videos are needed.</p>
+      <div class="panel folds num">
+        {% for f in run.folds %}
+        <div class="fold">
+          <span class="muted">Fold {{ f.fold }}</span>
+          <div class="bar"><span style="width: {{ (f.accuracy or 0) * 100 }}%;"></span></div>
+          <span>{{ '%.1f'|format((f.accuracy or 0) * 100) }}% <small>· {{ f.clips }} clips</small></span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <!-- How it was trained -->
+  <section>
+    <h2>How it was trained</h2>
+    <p class="lede">Each labeled clip goes through optical flow (how every pixel moves between frames), is summarised into motion numbers, and those numbers train the classifier.</p>
+    <div class="panel">
+      <div class="facts num">
+        <div>
+          <h3>Data</h3>
+          <dl class="kv">
+            <dt>Data</dt><dd>{% if run.snapshot %}{{ run.snapshot.name }}{% else %}live DB{% endif %}</dd>
+            <dt>Clips used</dt><dd>{{ run.clips }}{% if run.videos %} from {{ run.videos }} videos{% endif %}</dd>
+            <dt>View</dt><dd>{{ run.view if run.view != 'all' else 'All views' }}</dd>
+            {% for lc in run.label_counts %}<dt>&nbsp;&nbsp;{{ lc.name }}</dt><dd>{{ lc.n }}</dd>{% endfor %}
+            <dt>Held-out test videos</dt><dd>{{ run.held_out_videos }}{% if run.held_out_clips %} ({{ run.held_out_clips }} clips){% endif %}</dd>
+            <dt>Split</dt><dd>{{ run.split }}</dd>
+          </dl>
+        </div>
+        <div>
+          <h3>Optical flow</h3>
+          {% set ex = run.extraction %}
+          {% if ex %}
+          <dl class="kv">
+            <dt>Flow model</dt><dd>{{ ex.flow_model }}</dd>
+            <dt>Ran on</dt><dd>{{ ex.device }}</dd>
+            <dt>Clips processed</dt><dd>{{ ex.clips }}</dd>
+            <dt>Frame pairs</dt><dd>{{ ex.steps }}</dd>
+            <dt>Frame width</dt><dd>{{ ex.resize }} px</dd>
+            {% if ex.minutes %}<dt>Time taken</dt><dd>{{ ex.minutes }} min</dd>{% endif %}
+            <dt>Drone box found</dt><dd>{{ '%.0f'|format((ex.drone_box_rate or 0) * 100) }}%{% if not ex.drone_box_rate %} <span class="muted">(whole frame used)</span>{% endif %}</dd>
+          </dl>
+          {% else %}
+          <p class="muted" style="margin:0; font-size:.88rem;">No extraction summary found for <code>{{ run.features_csv or 'this run' }}</code>.</p>
+          {% endif %}
+        </div>
+        <div>
+          <h3>Classifier</h3>
+          <dl class="kv">
+            <dt>Best model</dt><dd>{{ run.model_name }}</dd>
+            <dt>Motion numbers per clip</dt><dd>{{ run.feature_count }}</dd>
+            <dt>Random seed</dt><dd>{{ run.seed }}</dd>
+          </dl>
+          {% if run.models|length > 1 %}
+          <table class="t" style="margin-top:14px; font-size:.84rem;">
+            <thead><tr><th>Also tried</th><th class="r">Accuracy</th></tr></thead>
+            <tbody>
+              {% for m in run.models %}
+              <tr><td>{{ m.name }}</td>
+                  <td class="r">{{ '%.1f'|format(m.accuracy * 100) }}%{% if m.accuracy_std is not none %} <span class="muted">± {{ '%.1f'|format(m.accuracy_std * 100) }}</span>{% endif %}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+        </div>
+      </div>
+      <div class="cmd-label">Run it again (from the repo folder, in the ML environment)</div>
+      <pre class="cmd">{{ run.command }}</pre>
+    </div>
+  </section>
+
+  <!-- Features -->
+  {% if run.top_features %}
+  <section>
+    <h2>What the model pays attention to</h2>
+    <p class="lede">The ten motion numbers that mattered most, longest bar first. Column names are shown for anyone changing the code.</p>
+    <div class="panel">
+      <table class="t">
+        <tbody>
+          {% for f in run.top_features %}
+          <tr>
+            <td style="width:42%;">{{ f.label }}<br><span class="mono">{{ f.column }}</span></td>
+            <td><div class="bar"><span style="width: {{ f.share * 100 }}%;"></span></div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Mistakes -->
+  {% if run.mistakes %}
+  <section>
+    <h2>Clips it got wrong with the most confidence</h2>
+    <p class="lede">Worth rewatching: when the model is sure and wrong, sometimes the label is the problem.</p>
+    <div class="panel">
+      <table class="t num">
+        <thead><tr><th>Clip</th><th>Labeled as</th><th>Model said</th><th class="r">Confidence</th></tr></thead>
+        <tbody>
+          {% for m in run.mistakes %}
+          <tr>
+            <td>{{ m.clip }}<br><span class="mono">{{ m.video_id }}</span></td>
+            <td>{{ m.truth }}</td>
+            <td>{{ m.guess }}</td>
+            <td class="r">{% if m.confidence is not none %}{{ '%.0f'|format(m.confidence * 100) }}%{% else %}-{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+{% endif %}
+
+  <!-- Labeling progress -->
+  {% if data.labeled %}
+  <section>
+    <h2>Labeled so far</h2>
+    <p class="lede">Events in the active dataset’s {{ data.labeled.videos }} labeled videos. The next phase needs {{ data.events_target }} of each.</p>
+    <div class="panel">
+      <table class="t num">
+        <thead><tr><th>Event</th><th style="width:50%;">Toward {{ data.events_target }}</th><th class="r">All views</th><th class="r">FPV</th></tr></thead>
+        <tbody>
+          {% for c in data.labeled.classes %}
+          <tr>
+            <td>{{ c.name }}</td>
+            <td><div class="bar"><span style="width: {{ c.share * 100 }}%;"></span></div></td>
+            <td class="r">{{ c.total }}{% if c.total >= data.events_target %} <span class="tag tag--on">done</span>{% endif %}</td>
+            <td class="r">{{ c.fpv }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Snapshots -->
+  <section>
+    <h2>Data snapshots</h2>
+    <p class="lede">Frozen copies of the labeled data. Train from a snapshot so everyone uses exactly the same videos, labels and test split; runs record which one they used.</p>
+    {% if data.snapshots %}
+    <div class="panel">
+      <table class="t num">
+        <thead><tr><th>Snapshot</th><th>Made</th><th class="r">Videos</th><th class="r">Clips</th><th class="hide-sm">Events (T / L / m / S)</th><th>Fingerprint</th><th></th></tr></thead>
+        <tbody>
+          {% for s in data.snapshots %}
+          <tr>
+            <td>{{ s.id }}{% if s.note %}<br><span class="muted" style="font-size:.82rem;">{{ s.note }}</span>{% endif %}</td>
+            <td>{{ s.created_at[:10] }}<br><span class="mono">{{ s.created_on }}</span></td>
+            <td class="r">{{ s.labeled_videos }}</td>
+            <td class="r">{{ s.clips }}</td>
+            <td class="hide-sm">{{ s.events['takeoff'] }} / {{ s.events['land'] }} / {{ s.events['minor-crash'] }} / {{ s.events['severe-crash'] }}</td>
+            <td><span class="mono">{{ s.fingerprint[:12] }}</span></td>
+            <td class="r">{% if s.zip %}<a class="plain" href="{{ url_for('download_snapshot', filename=s.zip) }}">Download{% if s.zip_mb %} ({{ s.zip_mb }} MB){% endif %}</a>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:.9rem;">None yet. On the labeling server run <code>python LabelGUI/data_snapshot.py create</code>.</p>
+    {% endif %}
+  </section>
+
+  <!-- History -->
+  {% if data.runs %}
+  <section>
+    <h2>All training runs</h2>
+    <p class="lede">Newest first. Only runs split by video give a trustworthy score, and only runs on the same data snapshot (same fingerprint) can be compared directly.</p>
+    <div class="panel" style="overflow-x:auto;">
+      <table class="t num">
+        <thead><tr><th>Run</th><th>Date</th><th>Data</th><th>View</th><th class="r">Clips</th><th>Split</th><th class="r">Accuracy</th></tr></thead>
+        <tbody>
+          {% for r in data.runs %}
+          <tr>
+            <td><a class="plain" href="?run={{ r.name }}">{{ r.name }}</a>{% if run and r.name == run.name %} <span class="tag tag--on">shown</span>{% endif %}</td>
+            <td>{{ r.date_short }}</td>
+            <td>{% if r.snapshot %}{{ r.snapshot.id }} <span class="mono">{{ r.snapshot.fingerprint[:8] }}</span>{% else %}<span class="muted">live</span>{% endif %}</td>
+            <td>{{ r.view if r.view != 'all' else 'All' }}</td>
+            <td class="r">{{ r.clips or '-' }}</td>
+            <td>{% if r.honest %}{{ r.split }}{% else %}<span class="tag tag--warn">{{ r.split }}, not comparable</span>{% endif %}</td>
+            <td class="r">{{ '%.1f'|format(r.accuracy * 100) }}%{% if r.accuracy_std is not none %} <span class="muted">± {{ '%.1f'|format(r.accuracy_std * 100) }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:.85rem; margin-top:14px;">How to run optical flow and training on a Mac or a Windows/Linux GPU PC: <code>docs/OPTICAL_FLOW_GUIDE.md</code>.</p>
+  </section>
+  {% endif %}
+</main>
 </body>
 </html>

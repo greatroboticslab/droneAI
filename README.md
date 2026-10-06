@@ -193,6 +193,9 @@ Heavy ML jobs (DPFlow optical flow, YOLO, VideoMAE) need an NVIDIA GPU with CUDA
 
 6. Run the ML scripts with `--device cuda`.
 
+To run optical flow and training (on a GPU PC or a Mac), and to read the results on the
+**Optical-flow model** page, follow [docs/OPTICAL_FLOW_GUIDE.md](docs/OPTICAL_FLOW_GUIDE.md).
+
 ### Check the install
 
 Run the unit tests. They use temporary databases and don't touch your data:
@@ -228,6 +231,9 @@ Then open this address in your browser:
 ```text
 http://localhost:5000
 ```
+
+The team labels on one shared server (the NVIDIA PC) from their browsers. To set it up, move the
+data to it, and let teammates connect, see [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md).
 
 ---
 

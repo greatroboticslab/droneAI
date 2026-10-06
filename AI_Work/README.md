@@ -51,6 +51,11 @@ The newest experiment is the **DPFlow tabular baseline**. Instead of giving the 
 
 This is useful because the current dataset is still small. Tree-based tabular models can sometimes work better than LSTMs when there are not many clips.
 
+> **Note (2026-09-29):** the numbers below come from a single random split. On the **clip** split,
+> clips from the same video can land in both training and validation, so those scores are too
+> optimistic. `train_dpflow_tabular_models.py` now only reports 5-fold cross-validation grouped
+> by video (mean ± std). These rows stay here as history until the grouped-CV baseline is re-run.
+
 | Method | Split | Accuracy | Macro F1 | Weighted F1 | Notes |
 |---|---:|---:|---:|---:|---|
 | Static ViT baseline | clip | 31.58% | — | — | Static-frame baseline. Weak because events are motion-based. |

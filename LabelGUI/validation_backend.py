@@ -24,34 +24,65 @@ DB_PATH = REPO_DIR / "db" / "droneai.sqlite"
 db = DBStore(str(DB_PATH))
 
 # -----------------------
-# Globals / session state
+# Labeling sessions
 # -----------------------
-_processing_thread = None
-_video_done = False
-_log_file_path = None
-_delete_original = False
-_event_times = []          # list of tuples: (idx, event_type, time_sec)
-_video_duration = 0.0
-_current_video_file = None
-_validation_sid = None
-_target_folder = None
-_last_youtube_link = ""
+# One LabelingSession per video being labeled, keyed by its sid. The browser
+# keeps its sid in the Flask session, so several people can label different
+# videos on one server at the same time without touching each other's video,
+# marks, pause or clock.
 
-_extraction_in_progress = False
-_extraction_current = 0
-_extraction_total = 0
+STREAM_MAX_WIDTH = 960   # frames sent to the browser; clips are cut from the original
+FINISHED_SESSION_TTL_SEC = 3600
 
-_done_event = None
-_cancel_event = None
-_state_lock = threading.Lock()
-
-# Download/session status surfaced to the UI (see get_validation_status)
-_download_state = "idle"      # idle | downloading | ready | failed
-_download_error = ""          # human-readable reason when state == failed
-_download_detail = ""         # raw technical detail (last yt-dlp error)
+_sessions = {}
+_sessions_lock = threading.Lock()
+_progress_lock = threading.Lock()
 
 CLIP_BEFORE_SEC = 2.0
 CLIP_AFTER_SEC = 1.0
+
+
+class LabelingSession:
+    def __init__(self, sid, youtube_link=""):
+        self.sid = sid
+        self.lock = threading.Lock()
+        self.link = (youtube_link or "").strip()
+        self.state = "downloading"     # downloading | ready | failed | idle (cancelled)
+        self.error = ""
+        self.detail = ""
+        self.video_file = None
+        self.video_done = False
+        self.duration = 0.0
+        self.events = []               # [(idx, event_type, time_sec)]
+        self.done_event = threading.Event()
+        self.cancel_event = threading.Event()
+        self.playback = video_utils.PlaybackState()
+        self.stream_generation = 0
+        self.extraction = {"in_progress": False, "current": 0, "total": 0}
+        self.finished_at = None
+
+    def end(self, cancel=False):
+        with self.lock:
+            if cancel:
+                self.cancel_event.set()
+            self.video_done = True
+            self.done_event.set()
+        self.playback.set_pause_flag(False)
+
+
+def get_session(sid):
+    with _sessions_lock:
+        return _sessions.get(sid) if sid else None
+
+
+def _register(session):
+    now = time.time()
+    with _sessions_lock:
+        # Forget sessions that ended a while ago; their results are in the DB.
+        for old_sid, old in list(_sessions.items()):
+            if old.finished_at and now - old.finished_at > FINISHED_SESSION_TTL_SEC:
+                del _sessions[old_sid]
+        _sessions[session.sid] = session
 
 
 # -----------------------
@@ -78,38 +109,24 @@ def start_validation_thread(
     person_name=None,
     scenario_base=None,
     local_video_path=None,
+    sid=None,
 ):
     """
-    Starts one clean validation session.
+    Runs one validation session: download, then wait for the labeler to finish,
+    then cut the event clips. Blocks while the video downloads; use
+    start_validation_async from a request handler.
 
     local_video_path: an uploaded video file to label instead of downloading
     youtube_link. It is never deleted, even with delete_original.
 
     Saves to:
         LabelGUI/ValidationResults/<folder_name>/
-
-    This version prevents old background sessions from writing files later.
     """
-    global _processing_thread, _video_done, _log_file_path
-    global _delete_original, _event_times, _video_duration, _current_video_file
-    global _validation_sid, _target_folder, _last_youtube_link
-    global _done_event, _cancel_event
-    global _download_state, _download_error, _download_detail
-
-    # Cancel any previous unfinished session
-    old_thread = None
-
-    with _state_lock:
-        if _cancel_event is not None:
-            _cancel_event.set()
-
-        if _done_event is not None:
-            _done_event.set()
-
-        old_thread = _processing_thread
-
-    if old_thread and old_thread.is_alive():
-        old_thread.join(timeout=1.0)
+    session = get_session(sid)
+    if session is None:
+        session = LabelingSession(sid or str(uuid.uuid4()), youtube_link)
+        _register(session)
+    sid = session.sid
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -130,7 +147,6 @@ def start_validation_thread(
 
     folder_name = sanitize_folder_name(folder_name)
     target_folder = get_unique_folder_name(results_dir, folder_name)
-    os.makedirs(target_folder, exist_ok=True)
 
     clips_folder = os.path.join(target_folder, "clips")
     os.makedirs(clips_folder, exist_ok=True)
@@ -139,33 +155,13 @@ def start_validation_thread(
         # Uploaded files are the only copy - never delete them after labeling.
         delete_original = False
 
-    local_log_file_path = os.path.join(target_folder, "event_log.txt")
-    local_validation_sid = str(uuid.uuid4())
-    local_event_times = []
-    local_done_event = threading.Event()
-    local_cancel_event = threading.Event()
-
-    with _state_lock:
-        _video_done = False
-        _download_state = "downloading"
-        _download_error = ""
-        _download_detail = ""
-        _event_times = local_event_times
-        _video_duration = 0.0
-        _delete_original = bool(delete_original)
-        _last_youtube_link = (youtube_link or "").strip()
-        _current_video_file = None
-        _validation_sid = local_validation_sid
-        _target_folder = target_folder
-        _log_file_path = local_log_file_path
-        _done_event = local_done_event
-        _cancel_event = local_cancel_event
+    log_file_path = os.path.join(target_folder, "event_log.txt")
 
     db.upsert_validation_session(
-        sid=local_validation_sid,
+        sid=sid,
         person_name=(person_name or ""),
         scenario_base=(scenario_base or ""),
-        youtube_link=_last_youtube_link,
+        youtube_link=session.link,
         folder_path=os.path.relpath(target_folder, start=str(REPO_DIR)),
         delete_original=1 if bool(delete_original) else 0,
         status="running",
@@ -175,11 +171,11 @@ def start_validation_thread(
 
     metadata_path = os.path.join(target_folder, "metadata.json")
     metadata = {
-        "sid": local_validation_sid,
+        "sid": sid,
         "folder_name": os.path.basename(target_folder),
         "person_name": person_name or "",
         "scenario_base": scenario_base or "",
-        "youtube_link": _last_youtube_link,
+        "youtube_link": session.link,
         "created_at": datetime.utcnow().isoformat(),
         "status": "running",
     }
@@ -199,26 +195,25 @@ def start_validation_thread(
             youtube_link, youtube_downloads_dir
         )
 
-    if local_cancel_event.is_set():
-        with _state_lock:
-            _download_state = "idle"
-        db.finalize_validation_session(local_validation_sid, 0.0, 0, status="cancelled")
+    if session.cancel_event.is_set():
+        with session.lock:
+            session.state = "idle"
+            session.finished_at = time.time()
+        db.finalize_validation_session(sid, 0.0, 0, status="cancelled")
         return
 
-    with _state_lock:
-        _current_video_file = downloaded_filepath
-
     if not downloaded_filepath:
-        with _state_lock:
-            _video_done = True
-            _download_state = "failed"
-            _download_error = dl_error or "Download failed."
-            _download_detail = dl_detail or ""
-            local_done_event.set()
+        with session.lock:
+            session.video_done = True
+            session.state = "failed"
+            session.error = dl_error or "Download failed."
+            session.detail = dl_detail or ""
+            session.finished_at = time.time()
+            session.done_event.set()
 
-        db.finalize_validation_session(local_validation_sid, 0.0, 0, status="failed")
+        db.finalize_validation_session(sid, 0.0, 0, status="failed")
 
-        with open(local_log_file_path, "w", encoding="utf-8") as f:
+        with open(log_file_path, "w", encoding="utf-8") as f:
             f.write("Download failed.\n")
             f.write(f"Link: {youtube_link}\n")
             f.write(f"Reason: {dl_error}\n")
@@ -235,63 +230,52 @@ def start_validation_thread(
 
         return
 
-    with _state_lock:
-        _download_state = "ready"
-        _download_error = ""
-        _download_detail = ""
+    with session.lock:
+        session.video_file = downloaded_filepath
+        session.state = "ready"
 
     db.upsert_validation_session(
-        sid=local_validation_sid,
-        youtube_link=_last_youtube_link,
+        sid=sid,
+        youtube_link=session.link,
         video_path=os.path.relpath(downloaded_filepath, start=str(REPO_DIR)),
         status="running",
     )
 
     def video_thread():
-        nonlocal downloaded_filepath
-        nonlocal target_folder
-        nonlocal clips_folder
-        nonlocal youtube_link
-        nonlocal base_dir
-        nonlocal metadata
-        nonlocal metadata_path
-        nonlocal local_log_file_path
-        nonlocal local_event_times
-        nonlocal local_done_event
-        nonlocal local_cancel_event
-        nonlocal local_validation_sid
-
-        with open(local_log_file_path, "w", encoding="utf-8") as f:
+        with open(log_file_path, "w", encoding="utf-8") as f:
             f.write(f"YouTube Link: {youtube_link}\n")
             f.write(f"Output Folder: {os.path.relpath(target_folder, base_dir)}\n")
             f.write(f"Clips Folder: {os.path.relpath(clips_folder, base_dir)}\n")
             f.write(f"Person: {person_name or ''}\n")
             f.write(f"Scenario: {scenario_base or ''}\n\n")
 
-        # Wait until the current video stream ends
-        while not local_done_event.is_set():
-            time.sleep(0.5)
+        # Wait until the labeler clicks Done (or the session is cancelled).
+        session.done_event.wait()
 
-        # If this session was cancelled because a new session started,
-        # do not extract clips.
-        if local_cancel_event.is_set():
+        # Where playback stopped: the end of the video, or earlier when the
+        # labeler finished early. Background windows only use [0, this].
+        watched_until_sec = float(session.playback.get_current_time_sec() or 0.0)
+
+        if session.cancel_event.is_set():
             db.finalize_validation_session(
-                local_validation_sid,
-                duration_sec=float(_video_duration or 0.0),
-                events_count=int(len(local_event_times)),
+                sid,
+                duration_sec=float(session.duration or 0.0),
+                events_count=int(len(session.events)),
                 status="cancelled"
             )
 
             metadata["status"] = "cancelled"
             metadata["finished_at"] = datetime.utcnow().isoformat()
-            metadata["events_count"] = int(len(local_event_times))
+            metadata["events_count"] = int(len(session.events))
 
             with open(metadata_path, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
 
+            session.finished_at = time.time()
             return
 
-        events_snapshot = list(local_event_times)
+        with session.lock:
+            events_snapshot = list(session.events)
 
         cap_for_fps = cv2.VideoCapture(downloaded_filepath)
         fps = (cap_for_fps.get(cv2.CAP_PROP_FPS) or 30.0) if cap_for_fps.isOpened() else 30.0
@@ -302,7 +286,8 @@ def start_validation_thread(
             target_folder,
             events_snapshot,
             fps,
-            log_file_path=local_log_file_path
+            log_file_path=log_file_path,
+            progress=session.extraction,
         )
 
         if bool(delete_original) and os.path.exists(downloaded_filepath):
@@ -311,7 +296,7 @@ def start_validation_thread(
             except Exception:
                 pass
 
-        with open(local_log_file_path, "a", encoding="utf-8") as f:
+        with open(log_file_path, "a", encoding="utf-8") as f:
             f.write(f"\nTotal Events Observed: {len(events_snapshot)}\n")
 
         try:
@@ -325,198 +310,91 @@ def start_validation_thread(
         except Exception:
             pass
 
+        duration_now = float(session.duration or 0.0)
+        if duration_now > 0:
+            watched_until_sec = min(watched_until_sec, duration_now)
         db.finalize_validation_session(
-            local_validation_sid,
-            duration_sec=float(_video_duration or 0.0),
+            sid,
+            duration_sec=duration_now,
             events_count=int(len(events_snapshot)),
-            status="final"
+            status="final",
+            watched_until_sec=watched_until_sec,
         )
 
         metadata["status"] = "final"
         metadata["finished_at"] = datetime.utcnow().isoformat()
         metadata["events_count"] = int(len(events_snapshot))
-        metadata["duration_sec"] = float(_video_duration or 0.0)
+        metadata["duration_sec"] = duration_now
+        metadata["watched_until_sec"] = watched_until_sec
 
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
-        finalize_video(target_folder)
+        session.finished_at = time.time()
 
-    _processing_thread = threading.Thread(target=video_thread, daemon=True)
-    _processing_thread.start()
-
-    
-    def video_thread():
-        nonlocal downloaded_filepath, target_folder, clips_folder, youtube_link, base_dir, metadata_path, metadata
-
-        with open(_log_file_path, "w", encoding="utf-8") as f:
-            f.write(f"YouTube Link: {youtube_link}\n")
-            f.write(f"Output Folder: {os.path.relpath(target_folder, base_dir)}\n")
-            f.write(f"Clips Folder: {os.path.relpath(clips_folder, base_dir)}\n")
-            f.write(f"Person: {person_name or ''}\n")
-            f.write(f"Scenario: {scenario_base or ''}\n\n")
-
-        # Wait until user finishes watching/marking OR stream ends
-        while not _video_done:
-            time.sleep(0.5)
-
-        # Extract clips after marking ends
-        cap_for_fps = cv2.VideoCapture(downloaded_filepath)
-        fps = (cap_for_fps.get(cv2.CAP_PROP_FPS) or 30.0) if cap_for_fps.isOpened() else 30.0
-        cap_for_fps.release()
-
-        multiple_pass_extract(downloaded_filepath, target_folder, _event_times, fps)
-
-        # Optionally delete original downloaded video
-        if _delete_original and os.path.exists(downloaded_filepath):
-            try:
-                os.remove(downloaded_filepath)
-            except Exception:
-                pass
-
-        # Log summary
-        with open(_log_file_path, "a", encoding="utf-8") as f:
-            f.write(f"\nTotal Events Observed: {len(_event_times)}\n")
-
-        # Update progress.json
-        try:
-            update_progress_record(
-                person_name=person_name,
-                youtube_link=youtube_link,
-                scenario_base=scenario_base,
-                target_folder=target_folder,
-                events_count=len(_event_times),
-            )
-        except Exception:
-            pass
-
-        # Finalize DB session
-        db.finalize_validation_session(
-            _validation_sid,
-            duration_sec=float(_video_duration or 0.0),
-            events_count=int(len(_event_times)),
-            status="final"
-        )
-
-        # Finalize metadata
-        metadata["status"] = "final"
-        metadata["finished_at"] = datetime.utcnow().isoformat()
-        metadata["events_count"] = int(len(_event_times))
-        metadata["duration_sec"] = float(_video_duration or 0.0)
-
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-
-        finalize_video(target_folder)
-
-    _processing_thread = threading.Thread(target=video_thread, daemon=True)
-    _processing_thread.start()
-
-    
-    def video_thread():
-        nonlocal downloaded_filepath, target_folder, youtube_link, base_dir
-
-        with open(_log_file_path, "w", encoding="utf-8") as f:
-            f.write(f"YouTube Link: {youtube_link}\n")
-            f.write(f"Folder: {os.path.relpath(target_folder, base_dir)}\n\n")
-
-        # Wait until user finishes watching/marking OR stream ends
-        while not _video_done:
-            time.sleep(0.5)
-
-        # Extract clips after marking ends
-        cap_for_fps = cv2.VideoCapture(downloaded_filepath)
-        fps = (cap_for_fps.get(cv2.CAP_PROP_FPS) or 30.0) if cap_for_fps.isOpened() else 30.0
-        cap_for_fps.release()
-
-        multiple_pass_extract(downloaded_filepath, target_folder, _event_times, fps)
-
-        # Optionally delete original
-        if _delete_original and os.path.exists(downloaded_filepath):
-            try:
-                os.remove(downloaded_filepath)
-            except Exception:
-                pass
-
-        # Log summary
-        with open(_log_file_path, "a", encoding="utf-8") as f:
-            f.write(f"\nTotal Events Observed: {len(_event_times)}\n")
-
-        # Update progress.json (Excel-driven sessions only)
-        try:
-            update_progress_record(
-                person_name=person_name,
-                youtube_link=youtube_link,
-                scenario_base=scenario_base,
-                target_folder=target_folder,
-                events_count=len(_event_times),
-            )
-        except Exception:
-            pass
-
-        # Finalize DB session
-        db.finalize_validation_session(
-            _validation_sid,
-            duration_sec=float(_video_duration or 0.0),
-            events_count=int(len(_event_times)),
-            status="final"
-        )
-
-        finalize_video(target_folder)
-
-    _processing_thread = threading.Thread(target=video_thread, daemon=True)
-    _processing_thread.start()
+    threading.Thread(target=video_thread, daemon=True).start()
 
 
-def generate_video_stream():
+def start_validation_async(**kwargs):
     """
-    Streams the current downloaded video via MJPEG frames.
-    Single loop only (no duplicates).
+    Start a validation session in the background and return its sid at once,
+    so the page can show "Getting the video…" instead of hanging on the click.
+    The session exists (state "downloading") before this returns.
     """
-    global _video_done, _video_duration, _current_video_file, _done_event
-    
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    youtube_downloads_dir = os.path.join(base_dir, "YouTubeDownloads")
+    session = LabelingSession(str(uuid.uuid4()), kwargs.get("youtube_link", ""))
+    _register(session)
+    threading.Thread(
+        target=start_validation_thread, kwargs=dict(kwargs, sid=session.sid), daemon=True
+    ).start()
+    return session.sid
 
-    if _current_video_file and os.path.exists(_current_video_file):
-        candidate = _current_video_file
-    else:
-        try:
-            files = sorted(
-                [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
-                key=os.path.getmtime,
-            )
-        except Exception:
-            files = []
-        candidate = None
-        for f in reversed(files):
-            if f.lower().endswith(".mp4"):
-                candidate = f
-                break
 
-    if not candidate:
-        while not _video_done:
-            time.sleep(0.2)
-            yield b""
+def cancel_validation(sid):
+    """Abandon a session without saving clips (Skip, or the labeler started another video)."""
+    session = get_session(sid)
+    if session is not None:
+        session.end(cancel=True)
+
+
+def generate_video_stream(sid):
+    """
+    Streams the session's video via MJPEG frames.
+
+    At the last frame the stream holds that frame instead of ending, so the
+    labeler can still mark a landing or crash right at the end, or rewind.
+    The session only ends when they click Done (finish_validation_early).
+    """
+    session = get_session(sid)
+    if session is None or not session.video_file or not os.path.exists(session.video_file):
         return
 
-    cap = cv2.VideoCapture(candidate)
+    cap = cv2.VideoCapture(session.video_file)
     if not cap.isOpened():
-        while not _video_done:
-            time.sleep(0.2)
-            yield b""
         return
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-    _video_duration = (total_frames / fps) if total_frames else 0.0
+    session.duration = (total_frames / fps) if total_frames else 0.0
+    playback = session.playback
+    playback.set_video_duration(session.duration)
 
-    video_utils.set_video_duration(_video_duration)
-    video_utils.set_current_time_sec(0.0)
+    # Each connection gets a number; an older connection of the same session
+    # stops as soon as a newer one opens, so a reconnect never runs two
+    # players against one clock.
+    with session.lock:
+        session.stream_generation += 1
+        my_generation = session.stream_generation
+
+    if playback.get_current_time_sec() > 0:
+        # Browser reconnected - carry on where it was.
+        cap.set(cv2.CAP_PROP_POS_MSEC, playback.get_current_time_sec() * 1000)
+
+    def should_stop():
+        return session.stream_generation != my_generation or session.done_event.is_set()
 
     def draw_overlay(frame, current_time_sec):
         elapsed = video_utils.format_time(current_time_sec)
-        total = video_utils.format_time(_video_duration)
+        total = video_utils.format_time(session.duration)
         cv2.putText(
             frame,
             f"{elapsed} / {total}",
@@ -528,109 +406,134 @@ def generate_video_stream():
         )
         return frame
 
-    for mjpeg_frame in video_utils.read_video_frames(cap, fps, draw_overlay):
+    for mjpeg_frame in video_utils.read_video_frames(
+            cap, fps, draw_overlay, hold_at_end=True, should_stop=should_stop,
+            state=playback, max_width=STREAM_MAX_WIDTH):
         if not mjpeg_frame:
             time.sleep(0.05)
             continue
         yield mjpeg_frame
 
-    _video_done = True
+    cap.release()
+    if should_stop():
+        return
 
-    if _done_event is not None:
-        _done_event.set()
+    # Not a single frame could be decoded - end the session as before.
+    session.end()
 
 
-def mark_event_now(event_type: str):
+def _event_dict(idx, event_type, time_sec):
+    return {"index": idx, "type": event_type, "time_sec": round(float(time_sec), 2)}
+
+
+def mark_event_now(sid, event_type: str, reviewer: str = ""):
     """
-    Called by /mark_event endpoint.
-    Logs into the current active session only.
+    Called by /mark_event endpoint. reviewer = the logged-in user.
+    Returns the saved event, or None when there is no video to mark.
     """
-    global _event_times, _validation_sid
+    session = get_session(sid)
+    if session is None:
+        return None
+    current_time_sec = session.playback.get_current_time_sec()
 
-    current_time_sec = video_utils.get_current_time_sec()
+    with session.lock:
+        if session.state != "ready" or session.video_done or session.cancel_event.is_set():
+            return None
 
-    with _state_lock:
-        if _cancel_event is not None and _cancel_event.is_set():
-            return
-
-        idx = len(_event_times) + 1
-        _event_times.append((idx, event_type, current_time_sec))
-        sid = _validation_sid
-
-    if sid:
-        db.insert_validation_event(sid, idx, event_type, current_time_sec)
-
-
-def is_video_done():
-    return _video_done
-
-
-def finalize_video(target_folder):
-    global _video_done, _done_event
-
-    _video_done = True
-
-    if _done_event is not None:
-        _done_event.set()
+        idx = (session.events[-1][0] + 1) if session.events else 1
+        try:
+            db.insert_validation_event(sid, idx, event_type, current_time_sec, reviewer=reviewer)
+        except Exception as exc:
+            print("[mark_event_now] could not save event:", exc)
+            return None
+        session.events.append((idx, event_type, current_time_sec))
+        return _event_dict(idx, event_type, current_time_sec)
 
 
-def get_crash_count():
-    return len(_event_times)
+def undo_last_event(sid):
+    """Remove the most recent mark of the session. Returns it, or None."""
+    session = get_session(sid)
+    if session is None:
+        return None
+    with session.lock:
+        if session.video_done or not session.events:
+            return None
+        idx, event_type, time_sec = session.events[-1]
+        try:
+            db.delete_validation_event(sid, idx)
+        except Exception as exc:
+            print("[undo_last_event] could not delete event:", exc)
+            return None
+        session.events.pop()
+        return _event_dict(idx, event_type, time_sec)
 
 
-def get_extraction_progress():
-    return {
-        "in_progress": _extraction_in_progress,
-        "current": _extraction_current,
-        "total": _extraction_total,
-    }
+def list_current_events(sid):
+    session = get_session(sid)
+    if session is None:
+        return []
+    with session.lock:
+        return [_event_dict(*e) for e in session.events]
 
 
-def toggle_pause():
-    return video_utils.toggle_pause_flag()
+def is_video_done(sid):
+    session = get_session(sid)
+    return True if session is None else session.video_done
 
 
-def skip_video(offset_seconds: float):
-    video_utils.schedule_skip(offset_seconds)
+def finish_validation_early(sid):
+    """Stop playback and let the extraction thread save the marked events."""
+    session = get_session(sid)
+    if session is None or session.state != "ready":
+        return False
+    session.end()
+    return True
 
 
-def get_logged_events():
-    results = []
-    for (idx, event_type, ctime) in _event_times:
-        results.append({
-            "index": idx,
-            "type": event_type,
-            "start": sec_to_hms(max(0, ctime - 1)),
-            "end": sec_to_hms(ctime + 1),
-        })
-    return results
+def get_crash_count(sid):
+    session = get_session(sid)
+    return len(session.events) if session else 0
+
+
+def get_extraction_progress(sid):
+    session = get_session(sid)
+    return dict(session.extraction) if session else {"in_progress": False, "current": 0, "total": 0}
+
+
+def toggle_pause(sid):
+    session = get_session(sid)
+    return session.playback.toggle_pause_flag() if session else False
+
+
+def skip_video(sid, offset_seconds: float):
+    session = get_session(sid)
+    if session is not None:
+        session.playback.schedule_skip(offset_seconds)
 
 
 # -----------------------
 # Extraction (NO DUPLICATES)
 # -----------------------
-def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint, log_file_path=None):
-    global _extraction_in_progress, _extraction_current, _extraction_total
-
+def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint, log_file_path=None,
+                          progress=None):
+    """Cut one clip per event. `progress` (a dict) is updated for the UI."""
     if not event_times_list:
         return
 
     sorted_times = sorted(event_times_list, key=lambda x: x[2])
-
-    _extraction_in_progress = True
-    _extraction_current = 0
-    _extraction_total = len(sorted_times)
+    progress = progress if progress is not None else {}
+    progress.update(in_progress=True, current=0, total=len(sorted_times))
 
     clips_folder = os.path.join(target_folder, "clips")
     os.makedirs(clips_folder, exist_ok=True)
 
-    log_path = log_file_path or _log_file_path or os.path.join(target_folder, "event_log.txt")
+    log_path = log_file_path or os.path.join(target_folder, "event_log.txt")
 
     excel_rows = []
 
     with open(log_path, "a", encoding="utf-8") as lf:
         for (idx, event_type, ctime) in sorted_times:
-            _extraction_current += 1
+            progress["current"] += 1
 
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -695,7 +598,7 @@ def multiple_pass_extract(video_path, target_folder, event_times_list, fps_hint,
                 "clip_path": os.path.join("clips", clip_filename),
             })
 
-    _extraction_in_progress = False
+    progress["in_progress"] = False
 
     if excel_rows:
         csv_path = os.path.join(target_folder, "events.csv")
@@ -716,15 +619,18 @@ def sec_to_hms(sec: float) -> str:
 
 
 def get_unique_folder_name(parent_dir, base_name):
-    candidate = os.path.join(parent_dir, base_name)
-    if not os.path.exists(candidate):
-        return candidate
-    counter = 1
+    """Create and return a new folder: base_name, base_name1, base_name2, ...
+
+    Created here (not just checked) so two labelers starting at the same moment
+    never get the same folder."""
+    counter = 0
     while True:
-        new_candidate = os.path.join(parent_dir, f"{base_name}{counter}")
-        if not os.path.exists(new_candidate):
-            return new_candidate
-        counter += 1
+        candidate = os.path.join(parent_dir, base_name if counter == 0 else f"{base_name}{counter}")
+        try:
+            os.makedirs(candidate)
+            return candidate
+        except FileExistsError:
+            counter += 1
 
 def sanitize_folder_name(name: str) -> str:
     """
@@ -892,6 +798,9 @@ def _precheck_link(youtube_link: str):
     return None
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def download_video(youtube_link, download_folder):
     """
     Download the video behind `youtube_link` into `download_folder`.
@@ -975,9 +884,11 @@ def download_video(youtube_link, download_folder):
 
     errors = []
 
-    def try_with(fmt):
+    def try_with(fmt, player_clients=None):
         opts = dict(base_opts)
         opts["format"] = fmt
+        if player_clients:
+            opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(youtube_link, download=True)
@@ -996,7 +907,15 @@ def download_video(youtube_link, download_folder):
         if p:
             return p, "", ""
 
-    detail = "\n".join(errors)
+    # YouTube often answers the default client with 403 / "format not
+    # available" for videos that are fine; the mobile clients still get them.
+    if "youtube.com" in youtube_link or "youtu.be" in youtube_link:
+        for fmt in ("best[ext=mp4]", "best"):
+            p = try_with(fmt, player_clients=["android", "web", "ios"])
+            if p:
+                return p, "", ""
+
+    detail = _ANSI_RE.sub("", "\n".join(errors))
 
     # "Requested format is not available" from a fallback is a symptom, not the
     # cause - diagnose from the most specific error across all attempts.
@@ -1014,20 +933,35 @@ def download_video(youtube_link, download_folder):
     return None, _friendly_download_error(diagnostic, youtube_link), detail
 
 
-def get_validation_status():
+def get_validation_status(sid):
     """
-    Status of the current validation session, for the UI to poll.
+    Status of one labeling session, for the UI to poll.
     """
-    with _state_lock:
+    session = get_session(sid)
+    if session is None:
+        return {"sid": sid, "state": "idle", "error": "", "detail": "", "video_ready": False,
+                "video_name": "", "link": "", "done": True, "ffmpeg": bool(_find_ffmpeg_dir()),
+                "can_remove_unavailable": False, "link_is_dead": False}
+    with session.lock:
+        error = session.error
         return {
-            "state": _download_state,
-            "error": _download_error,
-            "detail": _download_detail,
-            "video_ready": bool(_current_video_file and os.path.exists(_current_video_file)),
-            "video_name": os.path.basename(_current_video_file) if _current_video_file else "",
-            "link": _last_youtube_link,
-            "done": bool(_video_done),
+            "sid": sid,
+            "state": session.state,
+            "error": error,
+            "detail": session.detail,
+            "video_ready": bool(session.video_file and os.path.exists(session.video_file)),
+            "video_name": os.path.basename(session.video_file) if session.video_file else "",
+            "link": session.link,
+            "done": bool(session.video_done),
             "ffmpeg": bool(_find_ffmpeg_dir()),
+            # Any failed video can be removed (the labeler confirms first);
+            # this one tells the page whether the link is known to be dead.
+            "can_remove_unavailable": session.state == "failed",
+            "link_is_dead": session.state == "failed" and (
+                "no longer available" in error.lower()
+                or "private and cannot" in error.lower()
+                or "no downloadable video" in error.lower()
+            ),
         }
 
 
@@ -1069,6 +1003,11 @@ def update_progress_record(person_name, youtube_link, scenario_base, target_fold
     if not person_name or not scenario_base:
         return
 
+    with _progress_lock:   # several labelers can finish at the same time
+        _update_progress(person_name, youtube_link, scenario_base, target_folder, events_count)
+
+
+def _update_progress(person_name, youtube_link, scenario_base, target_folder, events_count):
     prefix = (person_name or "").strip()[:4] or "User"
     data = _load_progress()
 
@@ -1103,8 +1042,4 @@ def get_progress_summary():
         out[prefix] = {"sessions": len(rec.get("sessions", [])), "total_events": int(rec.get("total_events", 0))}
     return out
 
-def get_current_validation_link():
-    return _last_youtube_link
 
-def get_current_validation_sid():
-    return _validation_sid

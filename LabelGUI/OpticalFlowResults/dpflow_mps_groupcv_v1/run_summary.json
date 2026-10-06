@@ -1,0 +1,21 @@
+{
+  "run_name": "dpflow_mps_groupcv_v1",
+  "flow_method": "PTLFlow_dpflow_things",
+  "model": "dpflow",
+  "checkpoint": "things",
+  "device": "mps",
+  "manifest": "LabelGUI/FrameDataset/frame_manifest.csv",
+  "detections": "",
+  "resize_width": 640,
+  "fps_fallback": 10.0,
+  "total_clips": 173,
+  "total_flow_steps": 2320,
+  "debug_images_saved": 10,
+  "mean_roi_available_rate": 0.0,
+  "mean_both_detected_rate": 0.0,
+  "elapsed_seconds": 2542.3414669036865,
+  "output_dir": "LabelGUI/OpticalFlowResults/dpflow_mps_groupcv_v1",
+  "sequence_features_csv": "LabelGUI/OpticalFlowResults/dpflow_mps_groupcv_v1/flow_sequence_features.csv",
+  "clip_summary_csv": "LabelGUI/OpticalFlowResults/dpflow_mps_groupcv_v1/clip_flow_summary.csv",
+  "debug_images": "LabelGUI/OpticalFlowResults/dpflow_mps_groupcv_v1/debug_flow_images"
+}

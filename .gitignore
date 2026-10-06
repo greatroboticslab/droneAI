@@ -9,6 +9,7 @@ LabelGUI/ValidationResults/
 LabelGUI/TrainingResults/
 LabelGUI/Uploads/
 LabelGUI/.ffmpeg_bin/
+LabelGUI/RecutClips/
 
 # Analysis outputs
 analysis_out/
@@ -29,3 +30,9 @@ CLAUDE.md
 ROADMAP.md
 
 Data_Excel/*
+
+# Local ML environment and generated frames
+venv-ml/
+LabelGUI/FrameDataset/
+venv-ml
+snapshots/

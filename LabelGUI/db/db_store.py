@@ -152,6 +152,17 @@ class DBStore:
                 if col not in existing:
                     conn.execute(f"ALTER TABLE dataset_items ADD COLUMN {col} TEXT DEFAULT ''")
 
+            # Who marked each event (multi-reviewer ready).
+            event_cols = {r["name"] for r in conn.execute("PRAGMA table_info(validation_events)")}
+            if "reviewer" not in event_cols:
+                conn.execute("ALTER TABLE validation_events ADD COLUMN reviewer TEXT DEFAULT ''")
+
+            # How far the video was played when the session ended (less than
+            # duration_sec when the labeler finished early). 0 = not recorded.
+            session_cols = {r["name"] for r in conn.execute("PRAGMA table_info(validation_sessions)")}
+            if "watched_until_sec" not in session_cols:
+                conn.execute("ALTER TABLE validation_sessions ADD COLUMN watched_until_sec REAL DEFAULT 0.0")
+
             conn.commit()
 
     # -------------------------
@@ -229,22 +240,42 @@ class DBStore:
             conn.execute(sql, vals)
             conn.commit()
 
-    def insert_validation_event(self, sid: str, idx: int, event_type: str, time_sec: float):
+    def insert_validation_event(self, sid: str, idx: int, event_type: str, time_sec: float,
+                                reviewer: str = ""):
         with self._conn() as conn:
             conn.execute("""
-                INSERT INTO validation_events (sid, idx, event_type, time_sec, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (sid, idx, event_type, float(time_sec), datetime.utcnow().isoformat()))
+                INSERT INTO validation_events (sid, idx, event_type, time_sec, created_at, reviewer)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (sid, idx, event_type, float(time_sec), datetime.utcnow().isoformat(), reviewer or ""))
             conn.commit()
 
-    def finalize_validation_session(self, sid: str, duration_sec: float, events_count: int, status: str = "final"):
+    def delete_validation_event(self, sid: str, idx: int):
         with self._conn() as conn:
-            conn.execute("""
-                UPDATE validation_sessions
-                SET duration_sec=?, events_count=?, status=?, updated_at=?
-                WHERE sid=?
-            """, (float(duration_sec), int(events_count), status, datetime.utcnow().isoformat(), sid))
+            conn.execute("DELETE FROM validation_events WHERE sid=? AND idx=?", (sid, int(idx)))
             conn.commit()
+
+    def finalize_validation_session(self, sid: str, duration_sec: float, events_count: int, status: str = "final",
+                                    watched_until_sec: Optional[float] = None):
+        with self._conn() as conn:
+            if watched_until_sec is None:
+                conn.execute("""
+                    UPDATE validation_sessions
+                    SET duration_sec=?, events_count=?, status=?, updated_at=?
+                    WHERE sid=?
+                """, (float(duration_sec), int(events_count), status, datetime.utcnow().isoformat(), sid))
+            else:
+                conn.execute("""
+                    UPDATE validation_sessions
+                    SET duration_sec=?, events_count=?, status=?, watched_until_sec=?, updated_at=?
+                    WHERE sid=?
+                """, (float(duration_sec), int(events_count), status, float(watched_until_sec),
+                      datetime.utcnow().isoformat(), sid))
+            conn.commit()
+
+    def get_validation_session_status(self, sid: str) -> Optional[str]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT status FROM validation_sessions WHERE sid=?", (sid,)).fetchone()
+            return row["status"] if row else None
 
     def upsert_training_session(self, **row):
         now = datetime.utcnow().isoformat()
@@ -350,6 +381,68 @@ class DBStore:
             row = cur.fetchone()
             return row["file_blob"] if row else None
 
+    def _edit_dataset_workbook(self, conn, item, *, remove=False, reset=False, labeled_by=""):
+        """Update the stored workbook inside the queue item's DB transaction."""
+        from labeling_workbook import edit_workbook
+
+        dataset = conn.execute(
+            "SELECT file_blob, original_filename FROM datasets WHERE dataset_key=?",
+            (item["dataset_key"],),
+        ).fetchone()
+        if not dataset:
+            raise ValueError("Dataset not found.")
+        if not dataset["file_blob"]:
+            return  # Uploaded video datasets have no Excel source.
+        all_items = [dict(row) for row in conn.execute(
+            self._ITEM_SELECT + " WHERE dataset_key=? ORDER BY row_index", (item["dataset_key"],)
+        )]
+        updated = edit_workbook(dataset["file_blob"], item, all_items, remove=remove,
+                                reset=reset, labeled_by=labeled_by)
+        name = dataset["original_filename"]
+        if name.lower().endswith(".xls"):
+            name += "x"
+        conn.execute(
+            "UPDATE datasets SET file_blob=?, original_filename=? WHERE dataset_key=?",
+            (updated, name, item["dataset_key"]),
+        )
+
+    def complete_dataset_item(self, item_key: str, labeled_by: str, scenario_type: str):
+        with self._conn() as conn:
+            row = conn.execute(self._ITEM_SELECT + " WHERE item_key=?", (item_key,)).fetchone()
+            if not row:
+                raise ValueError("Queue item not found.")
+            item = dict(row)
+            if item["status"] == "labeled" and item["labeled_by"] == labeled_by:
+                return
+            self._edit_dataset_workbook(conn, item, labeled_by=labeled_by)
+            conn.execute("""
+                UPDATE dataset_items SET status='labeled', labeled_by=?, locked_by='',
+                    scenario_type=?, updated_at=? WHERE item_key=?
+            """, (labeled_by, scenario_type, datetime.utcnow().isoformat(), item_key))
+
+    def remove_unavailable_dataset_item(self, item_key: str):
+        with self._conn() as conn:
+            row = conn.execute(self._ITEM_SELECT + " WHERE item_key=?", (item_key,)).fetchone()
+            if not row:
+                raise ValueError("Queue item not found.")
+            item = dict(row)
+            self._edit_dataset_workbook(conn, item, remove=True)
+            conn.execute("DELETE FROM dataset_items WHERE item_key=?", (item_key,))
+
+    def reset_dataset_item(self, item_key: str):
+        with self._conn() as conn:
+            row = conn.execute(self._ITEM_SELECT + " WHERE item_key=?", (item_key,)).fetchone()
+            if not row:
+                raise ValueError("Queue item not found.")
+            item = dict(row)
+            if item["status"] == "not_labeled" and not item["labeled_by"]:
+                return
+            self._edit_dataset_workbook(conn, item, reset=True)
+            conn.execute("""
+                UPDATE dataset_items SET status='not_labeled', labeled_by='',
+                    locked_by='', scenario_type='', updated_at=? WHERE item_key=?
+            """, (datetime.utcnow().isoformat(), item_key))
+
     def replace_dataset_items(self, dataset_key: str, items: List[Dict[str, Any]]):
         with self._conn() as conn:
             conn.execute("DELETE FROM dataset_items WHERE dataset_key=?", (dataset_key,))
@@ -435,6 +528,20 @@ class DBStore:
                 item_key,
             ))
             conn.commit()
+
+    def claim_dataset_item(self, item_key: str, user: str, scenario_type: str = "") -> bool:
+        """
+        Lock a queue row to `user` in one step. False when someone else holds it,
+        so two people clicking at the same moment never get the same video.
+        """
+        with self._conn() as conn:
+            cur = conn.execute("""
+                UPDATE dataset_items
+                SET status='in_progress', locked_by=?, scenario_type=?, updated_at=?
+                WHERE item_key=? AND (locked_by IS NULL OR locked_by='' OR locked_by=?)
+            """, (user, scenario_type, datetime.utcnow().isoformat(), item_key, user))
+            conn.commit()
+            return cur.rowcount == 1
 
     def dataset_stats(self, dataset_key: str) -> Dict[str, int]:
         with self._conn() as conn:
